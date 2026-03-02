@@ -20,7 +20,7 @@ export function AppSidebar() {
           <ClipboardCheck className="h-4 w-4 text-primary-foreground" />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-foreground">AssessMod</h1>
+          <h1 className="text-sm font-semibold text-foreground">SmartXcess</h1>
           <p className="text-[10px] text-muted-foreground">Assessment Moderator</p>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { sampleAssessments } from "@/lib/mockData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { Link } from "react-router-dom";
 
 const statusStyles: Record<string, string> = {
   Pending: "bg-warning/10 text-warning border-warning/20",
@@ -21,7 +22,11 @@ const HistoryPage = () => {
 
       <div className="space-y-3">
         {history.map((a) => (
-          <div key={a.id} className="rounded-xl border border-border bg-card p-5 flex items-center justify-between animate-fade-in">
+          <Link
+            key={a.id}
+            to={`/moderate?id=${a.id}`}
+            className="rounded-xl border border-border bg-card p-5 flex items-center justify-between animate-fade-in transition-colors hover:bg-accent/30"
+          >
             <div>
               <p className="text-sm font-medium text-card-foreground">{a.title}</p>
               <p className="text-xs text-muted-foreground mt-1">{a.lecturer} · {a.course} · {a.date}</p>
@@ -34,7 +39,7 @@ const HistoryPage = () => {
                 {a.status}
               </Badge>
             </div>
-          </div>
+          </Link>
         ))}
         {history.length === 0 && (
           <div className="py-12 text-center text-sm text-muted-foreground">No history yet.</div>
