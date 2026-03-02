@@ -17,7 +17,9 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const App = () => (
+const App = () => { 
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -25,9 +27,13 @@ const App = () => (
       <HashRouter>
         <AuthProvider>
           <Routes>
+            <Route 
+            path="/" 
+            element={isAuthenticated ? <AppLayout /> : <Navigate to="/auth" />} 
+            ></Route>
             <Route path="/auth" element={<Auth />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-              <Route path="/" element={<Index />} />
+              <Route path="/" element={<Auth />} />
               <Route path="/assessments" element={<Assessments />} />
               <Route path="/moderate" element={<Moderate />} />
               <Route path="/history" element={<HistoryPage />} />
@@ -40,6 +46,6 @@ const App = () => (
       </HashRouter>
     </TooltipProvider>
   </QueryClientProvider>
-);
-
+  );
+}:
 export default App;
