@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute, AdminRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -17,9 +17,7 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const App = () => { 
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  return (
+const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -27,13 +25,10 @@ const App = () => {
       <HashRouter>
         <AuthProvider>
           <Routes>
-            <Route 
-            path="/" 
-            element={isAuthenticated ? <AppLayout /> : <Navigate to="/auth" />} 
-            ></Route>
+            <Route path="/" element={<Navigate to="/auth" replace />} />
             <Route path="/auth" element={<Auth />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-              <Route path="/" element={<Auth />} />
+              <Route path="/dashboard" element={<Index />} />
               <Route path="/assessments" element={<Assessments />} />
               <Route path="/moderate" element={<Moderate />} />
               <Route path="/history" element={<HistoryPage />} />
@@ -46,6 +41,6 @@ const App = () => {
       </HashRouter>
     </TooltipProvider>
   </QueryClientProvider>
-  );
-}:
+);
+
 export default App;

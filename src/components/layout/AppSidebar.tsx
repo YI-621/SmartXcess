@@ -1,6 +1,8 @@
-import { BarChart3, ClipboardCheck, FileText, History, Home, Settings } from "lucide-react";
+import { BarChart3, ClipboardCheck, FileText, History, Home, LogOut, Settings, Shield } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const navItems = [
   { to: "/", icon: Home, label: "Dashboard" },
@@ -12,6 +14,11 @@ const navItems = [
 
 export function AppSidebar() {
   const location = useLocation();
+  const { profile, isAdmin, signOut, user } = useAuth();
+
+  const initials = profile?.full_name
+    ? profile.full_name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+    : user?.email?.[0]?.toUpperCase() ?? "?";
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-card flex flex-col">
@@ -20,7 +27,7 @@ export function AppSidebar() {
           <ClipboardCheck className="h-4 w-4 text-primary-foreground" />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-foreground">SmartXcess</h1>
+          <h1 className="text-sm font-semibold text-foreground">AssessMod</h1>
           <p className="text-[10px] text-muted-foreground">Assessment Moderator</p>
         </div>
       </div>
@@ -41,21 +48,40 @@ export function AppSidebar() {
             {item.label}
           </NavLink>
         ))}
+
+        {isAdmin && (
+          <NavLink
+            to="/admin"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              location.pathname === "/admin"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <Shield className="h-4 w-4" />
+            Admin
+          </NavLink>
+        )}
       </nav>
 
-      <div className="border-t border-border p-3">
-        <NavLink
-          to="/settings"
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-            location.pathname === "/settings"
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-          )}
+      <div className="border-t border-border p-3 space-y-1">
+        <div className="flex items-center gap-3 px-3 py-2">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-primary/10 text-primary text-xs">{initials}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{profile?.full_name || user?.email}</p>
+            <p className="text-[10px] text-muted-foreground truncate">{profile?.department || "Lecturer"}</p>
+          </div>
+        </div>
+        <button
+          onClick={signOut}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
-          <Settings className="h-4 w-4" />
-          Settings
-        </NavLink>
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </button>
       </div>
     </aside>
   );
