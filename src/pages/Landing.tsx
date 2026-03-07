@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ClipboardCheck, ArrowRight, BarChart3, Shield, FileText } from "lucide-react";
 
-export const Landing = () => {
+export default function Landing() {
   const navigate = useNavigate();
 
   return (
@@ -60,4 +60,4 @@ export const Landing = () => {
       </footer>
     </div>
   );
-};
+}
