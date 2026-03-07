@@ -1,4 +1,4 @@
-import { sampleAssessments } from "@/lib/mockData";
+import { useModerationData } from "@/lib/mockData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -16,8 +16,9 @@ const statusStyles: Record<string, string> = {
 const Assessments = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const { data: assessments = [], isLoading } = useModerationData();
 
-  const filtered = sampleAssessments.filter(
+  const filtered = assessments.filter(
     (a) =>
       a.title.toLowerCase().includes(search.toLowerCase()) ||
       a.lecturer.toLowerCase().includes(search.toLowerCase()) ||
@@ -59,7 +60,12 @@ const Assessments = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filtered.map((a) => (
+            {isLoading && (
+              <tr>
+                <td className="px-5 py-8 text-center text-sm text-muted-foreground" colSpan={7}>Loading assessments...</td>
+              </tr>
+            )}
+            {!isLoading && filtered.map((a) => (
               <tr
                 key={a.id}
                 className="hover:bg-muted/30 transition-colors cursor-pointer"
@@ -84,7 +90,7 @@ const Assessments = () => {
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && (
+        {!isLoading && filtered.length === 0 && (
           <div className="py-12 text-center text-sm text-muted-foreground">No assessments found.</div>
         )}
       </div>

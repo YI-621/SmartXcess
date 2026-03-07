@@ -1,4 +1,4 @@
-import { sampleAssessments } from "@/lib/mockData";
+import { useModerationData } from "@/lib/mockData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -12,6 +12,8 @@ const statusStyles: Record<string, string> = {
 
 export function RecentAssessments() {
   const navigate = useNavigate();
+  const { data: assessments = [], isLoading } = useModerationData();
+  const recent = assessments.slice(0, 4);
 
   return (
     <div className="rounded-xl border border-border bg-card animate-fade-in">
@@ -25,7 +27,8 @@ export function RecentAssessments() {
         </button>
       </div>
       <div className="divide-y divide-border">
-        {sampleAssessments.map((a) => (
+        {isLoading && <div className="px-5 py-4 text-sm text-muted-foreground">Loading assessments...</div>}
+        {!isLoading && recent.map((a) => (
           <div
             key={a.id}
             className="flex items-center justify-between px-5 py-3.5 hover:bg-muted/50 transition-colors cursor-pointer"
@@ -43,6 +46,9 @@ export function RecentAssessments() {
             </div>
           </div>
         ))}
+        {!isLoading && recent.length === 0 && (
+          <div className="px-5 py-4 text-sm text-muted-foreground">No assessments yet.</div>
+        )}
       </div>
     </div>
   );
