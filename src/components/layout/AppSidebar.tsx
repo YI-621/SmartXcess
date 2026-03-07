@@ -1,20 +1,24 @@
-import { BarChart3, ClipboardCheck, FileText, History, Home, LogOut, Shield, User } from "lucide-react";
+import { ClipboardCheck, FileText, History, Home, LogOut, Shield, User } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-const navItems = [
-  { to: "/index", icon: Home, label: "Dashboard" },
-  { to: "/assessments", icon: FileText, label: "Assessments" },
-  { to: "/moderate", icon: ClipboardCheck, label: "Moderate" },
-  { to: "/history", icon: History, label: "History" },
-  { to: "/analytics", icon: BarChart3, label: "Analytics" },
+const allNavItems = [
+  { to: "/dashboard", icon: Home, label: "Dashboard", roles: ["lecturer"] },
+  { to: "/assessments", icon: FileText, label: "Assessments", roles: ["lecturer"] },
+  { to: "/moderate", icon: ClipboardCheck, label: "Moderate", roles: ["moderator"] },
+  { to: "/history", icon: History, label: "History", roles: ["moderator"] },
 ];
 
 export function AppSidebar() {
   const location = useLocation();
-  const { profile, isAdmin, signOut, user } = useAuth();
+  const { profile, isAdmin, roles, signOut, user } = useAuth();
+
+  // Admin sees everything; others see role-filtered items
+  const navItems = isAdmin
+    ? allNavItems
+    : allNavItems.filter((item) => roles.some((r) => item.roles.includes(r)));
 
   const initials = profile?.full_name
     ? profile.full_name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
@@ -27,7 +31,7 @@ export function AppSidebar() {
           <ClipboardCheck className="h-4 w-4 text-primary-foreground" />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-foreground">SmartXcess</h1>
+          <h1 className="text-sm font-semibold text-foreground">AssessMod</h1>
           <p className="text-[10px] text-muted-foreground">Assessment Moderator</p>
         </div>
       </div>
