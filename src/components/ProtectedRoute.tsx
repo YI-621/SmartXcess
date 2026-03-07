@@ -23,7 +23,7 @@ export function RoleRoute({ children, allowedRoles, fallback }: { children: Reac
   if (!user) return <Navigate to="/auth" replace />;
   if (!roles.some((r) => allowedRoles.includes(r))) {
     // Smart redirect based on role
-    const redirectTo = fallback || (roles.includes("moderator") ? "/moderate" : roles.includes("lecturer") ? "/" : "/profile");
+    const redirectTo = fallback || (roles.includes("moderator") ? "/moderate" : roles.includes("lecturer") ? "/" : "/welcome");
     return <Navigate to={redirectTo} replace />;
   }
   return <>{children}</>;
