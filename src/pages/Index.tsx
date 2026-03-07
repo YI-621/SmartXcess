@@ -2,37 +2,34 @@ import { FileText, ClipboardCheck, CheckCircle, AlertTriangle } from "lucide-rea
 import { StatCard } from "@/components/dashboard/StatCard";
 import { RecentAssessments } from "@/components/dashboard/RecentAssessments";
 import { BloomDistribution } from "@/components/dashboard/BloomDistribution";
-import { useModerationData, type BloomLevel } from "@/lib/mockData";
+import { sampleAssessments, sampleQuestions, type BloomLevel } from "@/lib/mockData";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
+const bloomData: { name: BloomLevel; count: number; color: string }[] = [
+  { name: "Remember", count: sampleQuestions.filter((q) => q.bloomLevel === "Remember").length, color: "hsl(280, 67%, 50%)" },
+  { name: "Understand", count: sampleQuestions.filter((q) => q.bloomLevel === "Understand").length, color: "hsl(234, 89%, 56%)" },
+  { name: "Apply", count: sampleQuestions.filter((q) => q.bloomLevel === "Apply").length, color: "hsl(199, 89%, 48%)" },
+  { name: "Analyze", count: sampleQuestions.filter((q) => q.bloomLevel === "Analyze").length, color: "hsl(142, 71%, 45%)" },
+  { name: "Evaluate", count: sampleQuestions.filter((q) => q.bloomLevel === "Evaluate").length, color: "hsl(38, 92%, 50%)" },
+  { name: "Create", count: sampleQuestions.filter((q) => q.bloomLevel === "Create").length, color: "hsl(0, 72%, 51%)" },
+];
+
+const difficultyData = [
+  { name: "Easy", count: sampleQuestions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
+  { name: "Medium", count: sampleQuestions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
+  { name: "Hard", count: sampleQuestions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
+];
+
+const complexityData = sampleQuestions.map((q, i) => ({
+  name: `Q${i + 1}`,
+  complexity: q.complexity,
+  similarity: q.similarityScore,
+}));
+
 const Dashboard = () => {
-  const { data: assessments = [], isLoading } = useModerationData();
-  const questions = assessments.flatMap((a) => a.questions);
-
-  const bloomData: { name: BloomLevel; count: number; color: string }[] = [
-    { name: "Remember", count: questions.filter((q) => q.bloomLevel === "Remember").length, color: "hsl(280, 67%, 50%)" },
-    { name: "Understand", count: questions.filter((q) => q.bloomLevel === "Understand").length, color: "hsl(234, 89%, 56%)" },
-    { name: "Apply", count: questions.filter((q) => q.bloomLevel === "Apply").length, color: "hsl(199, 89%, 48%)" },
-    { name: "Analyze", count: questions.filter((q) => q.bloomLevel === "Analyze").length, color: "hsl(142, 71%, 45%)" },
-    { name: "Evaluate", count: questions.filter((q) => q.bloomLevel === "Evaluate").length, color: "hsl(38, 92%, 50%)" },
-    { name: "Create", count: questions.filter((q) => q.bloomLevel === "Create").length, color: "hsl(0, 72%, 51%)" },
-  ];
-
-  const difficultyData = [
-    { name: "Easy", count: questions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
-    { name: "Medium", count: questions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
-    { name: "Hard", count: questions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
-  ];
-
-  const complexityData = questions.map((q, i) => ({
-    name: `Q${i + 1}`,
-    complexity: q.complexity,
-    similarity: q.similarityScore,
-  }));
-
-  const pending = assessments.filter((a) => a.status === "Pending").length;
-  const done = assessments.filter((a) => a.status === "Approved" || a.status === "Reviewed").length;
-  const flagged = questions.filter((q) => q.similarityScore > 50 || q.complexity < 30).length;
+  const pending = sampleAssessments.filter((a) => a.status === "Pending").length;
+  const done = sampleAssessments.filter((a) => a.status === "Approved" || a.status === "Reviewed").length;
+  const flagged = sampleQuestions.filter((q) => q.similarityScore > 50 || q.complexity < 30).length;
 
   return (
     <div className="space-y-6">
@@ -42,13 +39,11 @@ const Dashboard = () => {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={FileText} title="Total Assessments" value={assessments.length} subtitle="Uploaded by you" variant="primary" />
+        <StatCard icon={FileText} title="Total Assessments" value={sampleAssessments.length} subtitle="Uploaded by you" variant="primary" />
         <StatCard icon={ClipboardCheck} title="Pending Review" value={pending} subtitle="Awaiting moderation" variant="warning" />
         <StatCard icon={CheckCircle} title="Done Review" value={done} subtitle="Moderation completed" variant="success" />
         <StatCard icon={AlertTriangle} title="Flagged Issues" value={flagged} subtitle="Across all assessments" variant="destructive" />
       </div>
-
-      {isLoading && <p className="text-sm text-muted-foreground">Loading dashboard data...</p>}
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">

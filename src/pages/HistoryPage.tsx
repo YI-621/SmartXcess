@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useModerationData } from "@/lib/mockData";
+import { sampleAssessments } from "@/lib/mockData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { QuestionCard } from "@/components/moderate/QuestionCard";
@@ -15,13 +15,11 @@ const statusStyles: Record<string, string> = {
 };
 
 const HistoryPage = () => {
-  const { data: assessments = [], isLoading } = useModerationData();
-
   // Simulate: Approved/Reviewed = done (read-only), Pending = can continue moderating
-  const history = assessments.filter(
+  const history = sampleAssessments.filter(
     (a) => a.status === "Approved" || a.status === "Rejected" || a.status === "Reviewed"
   );
-  const inProgress = assessments.filter((a) => a.status === "Pending");
+  const inProgress = sampleAssessments.filter((a) => a.status === "Pending");
 
   const allItems = [
     ...inProgress.map((a) => ({ ...a, isDone: false })),
@@ -32,10 +30,6 @@ const HistoryPage = () => {
   const [comments, setComments] = useState<Record<string, string>>({});
 
   const selected = allItems.find((a) => a.id === selectedId);
-
-  if (isLoading) {
-    return <div className="text-sm text-muted-foreground">Loading moderation history...</div>;
-  }
 
   if (selected) {
     return (
