@@ -5,9 +5,9 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  // GitHub Pages serves this app from /SmartXcess-3/.
+  // GitHub Pages serves this app from /SmartXcess/.
   // Using a non-root base ensures built asset URLs resolve correctly.
-  base: "/SmartXcess-3/",
+  base: "/SmartXcess/",
   server: {
     host: "::",
     port: 8080,
