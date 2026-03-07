@@ -28,7 +28,21 @@ export default function Auth() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         navigate("/auth", { replace: true });
-        toast({ title: "Login failed", description: error.message, variant: "destructive" });
+        const message = error.message.toLowerCase();
+        const shouldSuggestSignup =
+          message.includes("invalid login credentials") ||
+          message.includes("email not confirmed") ||
+          message.includes("user not found");
+
+        if (shouldSuggestSignup) {
+          setIsLogin(false);
+          toast({
+            title: "Account not found",
+            description: "Please create an account using the sign up form.",
+          });
+        } else {
+          toast({ title: "Login failed", description: error.message, variant: "destructive" });
+        }
       } else {
         navigate("/");
       }
