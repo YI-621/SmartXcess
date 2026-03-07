@@ -23,8 +23,11 @@ export default function Auth() {
     setLoading(true);
 
     if (isLogin) {
+      // Clear stale local session state before attempting a fresh sign-in.
+      await supabase.auth.signOut({ scope: "local" });
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
+        navigate("/auth", { replace: true });
         toast({ title: "Login failed", description: error.message, variant: "destructive" });
       } else {
         navigate("/");
