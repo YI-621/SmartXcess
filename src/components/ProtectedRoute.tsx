@@ -10,16 +10,16 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading, isAdmin } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  const { user, loading, rolesLoading, isAdmin } = useAuth();
+  if (loading || rolesLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (!user) return <Navigate to="/auth" replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
 export function RoleRoute({ children, allowedRoles, fallback }: { children: React.ReactNode; allowedRoles: string[]; fallback?: string }) {
-  const { user, loading, roles } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  const { user, loading, rolesLoading, roles } = useAuth();
+  if (loading || rolesLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (!user) return <Navigate to="/auth" replace />;
   if (!roles.some((r) => allowedRoles.includes(r))) {
     // Smart redirect based on role
