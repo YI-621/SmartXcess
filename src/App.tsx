@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute, AdminRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -14,6 +14,8 @@ import Analytics from "./pages/Analytics";
 import Admin from "./pages/Admin";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
+import Profile from "./pages/Profile";
+import { Landing } from "./pages/Landing";
 
 const queryClient = new QueryClient();
 
@@ -25,7 +27,8 @@ const App = () => (
       <HashRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<Navigate to="/auth" replace />} />
+            <Route path="/welcome" element={<Landing />} />
+            <Route path="/" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Index />} />
@@ -33,6 +36,7 @@ const App = () => (
               <Route path="/moderate" element={<Moderate />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/analytics" element={<Analytics />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
             </Route>
             <Route path="*" element={<NotFound />} />

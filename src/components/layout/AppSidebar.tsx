@@ -1,11 +1,11 @@
-import { BarChart3, ClipboardCheck, FileText, History, Home, LogOut, Settings, Shield } from "lucide-react";
+import { BarChart3, ClipboardCheck, FileText, History, Home, LogOut, Shield, User } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const navItems = [
-  { to: "/", icon: Home, label: "Dashboard" },
+  { to: "/index", icon: Home, label: "Dashboard" },
   { to: "/assessments", icon: FileText, label: "Assessments" },
   { to: "/moderate", icon: ClipboardCheck, label: "Moderate" },
   { to: "/history", icon: History, label: "History" },
@@ -27,7 +27,7 @@ export function AppSidebar() {
           <ClipboardCheck className="h-4 w-4 text-primary-foreground" />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-foreground">AssessMod</h1>
+          <h1 className="text-sm font-semibold text-foreground">SmartXcess</h1>
           <p className="text-[10px] text-muted-foreground">Assessment Moderator</p>
         </div>
       </div>
@@ -66,15 +66,23 @@ export function AppSidebar() {
       </nav>
 
       <div className="border-t border-border p-3 space-y-1">
-        <div className="flex items-center gap-3 px-3 py-2">
+        <NavLink
+          to="/profile"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
+            location.pathname === "/profile"
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground"
+          )}
+        >
           <Avatar className="h-8 w-8">
             <AvatarFallback className="bg-primary/10 text-primary text-xs">{initials}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">{profile?.full_name || user?.email}</p>
+            <p className="text-sm font-medium truncate">{profile?.full_name || user?.email}</p>
             <p className="text-[10px] text-muted-foreground truncate">{profile?.department || "Lecturer"}</p>
           </div>
-        </div>
+        </NavLink>
         <button
           onClick={signOut}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
