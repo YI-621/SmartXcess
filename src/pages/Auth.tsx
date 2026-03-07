@@ -23,16 +23,10 @@ export default function Auth() {
     setLoading(true);
 
     if (isLogin) {
-      // Clear stale local session state before attempting a fresh sign-in.
-      await supabase.auth.signOut({ scope: "local" });
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        navigate("/auth", { replace: true });
         const message = error.message.toLowerCase();
-        const shouldSuggestSignup =
-          message.includes("invalid login credentials") ||
-          message.includes("email not confirmed") ||
-          message.includes("user not found");
+        const shouldSuggestSignup = /(invalid|credentials|user not found|not found|not registered|email not confirmed|no user)/i.test(message);
 
         if (shouldSuggestSignup) {
           setIsLogin(false);
