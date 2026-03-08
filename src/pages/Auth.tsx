@@ -1,5 +1,5 @@
-import { useState, FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, FormEvent, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +29,20 @@ export default function Auth() {
   const [department, setDepartment] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
+
+  useEffect(() => {
+    const routeState = location.state as { errorCode?: string; errorMessage?: string } | null;
+    if (routeState?.errorCode) {
+      toast({
+        title: `Access denied (${routeState.errorCode})`,
+        description: routeState.errorMessage ?? "Unable to access the requested page.",
+        variant: "destructive",
+      });
+      navigate("/auth", { replace: true, state: null });
+    }
+  }, [location.state, navigate, toast]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

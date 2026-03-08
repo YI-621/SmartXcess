@@ -23,7 +23,18 @@ export function RoleRoute({ children, allowedRoles, fallback }: { children: Reac
   if (!user) return <Navigate to="/auth" replace />;
   
   const currentRole = activeRole ?? roles[0];
-  if (!currentRole) return <Navigate to="/welcome" replace />;
+  if (!currentRole) {
+    return (
+      <Navigate
+        to="/auth"
+        replace
+        state={{
+          errorCode: "NO_ROLE_ASSIGNED",
+          errorMessage: "Your account exists, but no role is assigned yet. Please contact an administrator.",
+        }}
+      />
+    );
+  }
   if (!currentRole || !allowedRoles.includes(currentRole)) {
     const redirectTo = fallback || (currentRole === "moderator" ? "/moderate" : currentRole === "lecturer" ? "/" : "/welcome");
     return <Navigate to={redirectTo} replace />;
