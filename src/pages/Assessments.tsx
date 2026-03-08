@@ -88,32 +88,10 @@ const Assessments = () => {
 
       if (error) throw error;
 
-      // 4. Trigger automated moderation via edge function
       toast({
         title: "Assessment uploaded",
-        description: "Running automated moderation analysis...",
+        description: "Assessment saved successfully.",
       });
-
-      try {
-        const { data: modResult, error: modError } = await supabase.functions.invoke("moderate-assessment", {
-          body: { assessment_id: newAssessment.id },
-        });
-        if (modError) {
-          console.error("Moderation error:", modError);
-          toast({
-            title: "Moderation partially failed",
-            description: "File uploaded but automated analysis encountered an error. It can be re-triggered later.",
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title: "Moderation complete",
-            description: `${modResult.questions} questions analyzed. Overall score: ${modResult.overall_score}%`,
-          });
-        }
-      } catch (modErr) {
-        console.error("Moderation invocation error:", modErr);
-      }
 
       logActivity.mutate({
         type: "upload",
