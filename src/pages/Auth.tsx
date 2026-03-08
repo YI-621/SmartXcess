@@ -23,7 +23,7 @@ export default function Auth() {
     setLoading(true);
 
     if (isLogin) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         const message = error.message.toLowerCase();
         const shouldSuggestSignup = /(invalid|credentials|user not found|not found|not registered|email not confirmed|no user)/i.test(message);
@@ -38,6 +38,36 @@ export default function Auth() {
           toast({ title: "Login failed", description: error.message, variant: "destructive" });
         }
       } else {
+        const userId = data.user?.id;
+        if (!userId) {
+          toast({ title: "Login failed", description: "Missing user session after login.", variant: "destructive" });
+          setLoading(false);
+          return;
+        }
+
+        const { data: roleRows, error: roleError } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", userId)
+          .limit(1);
+
+        if (roleError) {
+          toast({ title: "Login failed", description: "Unable to verify your account role.", variant: "destructive" });
+          setLoading(false);
+          return;
+        }
+
+        if (!roleRows || roleRows.length === 0) {
+          await supabase.auth.signOut({ scope: "local" });
+          setIsLogin(false);
+          toast({
+            title: "Account setup incomplete",
+            description: "This email has no role assigned yet. Please sign up or ask admin to assign a role.",
+          });
+          setLoading(false);
+          return;
+        }
+
         navigate("/");
       }
     } else {
