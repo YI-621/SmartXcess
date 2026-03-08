@@ -1,35 +1,46 @@
-import { sampleAssessments, sampleQuestions, type BloomLevel } from "@/lib/mockData";
+import { Loader2 } from "lucide-react";
+import type { BloomLevel } from "@/lib/assessment";
+import { useAssessmentsWithQuestions } from "@/hooks/useData";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+const Analytics = () => {
+  const { data: assessments, isLoading } = useAssessmentsWithQuestions();
+  const questions = (assessments ?? []).flatMap((a) => a.questions);
 
-const bloomData: { name: BloomLevel; count: number; color: string }[] = [
-  { name: "Knowledge", count: sampleQuestions.filter((q) => q.bloomLevel === "Knowledge").length, color: "hsl(280, 67%, 50%)" },
-  { name: "Comprehension", count: sampleQuestions.filter((q) => q.bloomLevel === "Comprehension").length, color: "hsl(234, 89%, 56%)" },
-  { name: "Application", count: sampleQuestions.filter((q) => q.bloomLevel === "Application").length, color: "hsl(199, 89%, 48%)" },
-  { name: "Analysis", count: sampleQuestions.filter((q) => q.bloomLevel === "Analysis").length, color: "hsl(142, 71%, 45%)" },
-  { name: "Synthesis", count: sampleQuestions.filter((q) => q.bloomLevel === "Synthesis").length, color: "hsl(38, 92%, 50%)" },
-  { name: "Evaluation", count: sampleQuestions.filter((q) => q.bloomLevel === "Evaluation").length, color: "hsl(0, 72%, 51%)" },
-];
+  const bloomData: { name: BloomLevel; count: number; color: string }[] = [
+    { name: "Knowledge", count: questions.filter((q) => q.bloomLevel === "Knowledge").length, color: "hsl(280, 67%, 50%)" },
+    { name: "Comprehension", count: questions.filter((q) => q.bloomLevel === "Comprehension").length, color: "hsl(234, 89%, 56%)" },
+    { name: "Application", count: questions.filter((q) => q.bloomLevel === "Application").length, color: "hsl(199, 89%, 48%)" },
+    { name: "Analysis", count: questions.filter((q) => q.bloomLevel === "Analysis").length, color: "hsl(142, 71%, 45%)" },
+    { name: "Synthesis", count: questions.filter((q) => q.bloomLevel === "Synthesis").length, color: "hsl(38, 92%, 50%)" },
+    { name: "Evaluation", count: questions.filter((q) => q.bloomLevel === "Evaluation").length, color: "hsl(0, 72%, 51%)" },
+  ];
 
-const difficultyData = [
-  { name: "Easy", count: sampleQuestions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
-  { name: "Medium", count: sampleQuestions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
-  { name: "Hard", count: sampleQuestions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
-];
+  const difficultyData = [
+    { name: "Very Easy", count: questions.filter((q) => q.difficulty === "Very Easy").length, color: "hsl(160, 84%, 39%)" },
+    { name: "Easy", count: questions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
+    { name: "Medium", count: questions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
+    { name: "Hard", count: questions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
+    { name: "Very Hard", count: questions.filter((q) => q.difficulty === "Very Hard").length, color: "hsl(0, 72%, 35%)" },
+  ];
 
-const complexityData = sampleQuestions.map((q, i) => ({
-  name: `Q${i + 1}`,
-  complexity: q.complexity,
-  similarity: q.similarityScore,
-}));
+  const complexityData = questions.map((q, i) => ({
+    name: `Q${i + 1}`,
+    complexity: q.complexity,
+    similarity: q.similarityScore,
+  }));
 
-const Analytics = () => (
-  <div className="space-y-6">
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  }
+
+  return (
+    <div className="space-y-6">
     <div>
       <h2 className="text-xl font-bold text-foreground">Analytics</h2>
       <p className="text-sm text-muted-foreground mt-1">Assessment quality metrics and distributions</p>
     </div>
 
-    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
       <div className="rounded-xl border border-border bg-card p-5 animate-fade-in">
         <h3 className="text-sm font-semibold text-card-foreground mb-4">Bloom's Taxonomy Distribution</h3>
         <ResponsiveContainer width="100%" height={250}>
@@ -72,7 +83,14 @@ const Analytics = () => (
         </ResponsiveContainer>
       </div>
     </div>
+
+      {questions.length === 0 && (
+        <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+          No analytics data yet. Upload assessments to see distributions.
+        </div>
+      )}
   </div>
-);
+  );
+};
 
 export default Analytics;

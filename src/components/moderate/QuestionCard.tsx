@@ -1,4 +1,4 @@
-import { type Question, bloomColors, difficultyColors, type ModerationDetails } from "@/lib/mockData";
+import { type Question, bloomColors, difficultyColors } from "@/lib/assessment";
 import { AlertTriangle, CheckCircle2, Copy, MessageSquare, FileWarning, Lightbulb, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 

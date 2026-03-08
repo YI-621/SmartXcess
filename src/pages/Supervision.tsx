@@ -22,21 +22,26 @@ export default function Supervision() {
   }, []);
 
   const fetchSupervisedUsers = async () => {
-    const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, department");
-    const { data: roles } = await supabase.from("user_roles").select("user_id, role");
+    try {
+      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, department");
+      const { data: roles } = await supabase.from("user_roles").select("user_id, role");
 
-    if (profiles) {
-      const mapped = profiles
-        .map((p) => ({
-          user_id: p.user_id,
-          full_name: p.full_name,
-          department: p.department,
-          roles: roles?.filter((r) => r.user_id === p.user_id).map((r) => r.role) ?? [],
-        }))
-        .filter((u) => u.roles.includes("lecturer") || u.roles.includes("moderator"));
-      setUsers(mapped);
+      if (profiles) {
+        const mapped = profiles
+          .map((p) => ({
+            user_id: p.user_id,
+            full_name: p.full_name,
+            department: p.department,
+            roles: roles?.filter((r) => r.user_id === p.user_id).map((r) => r.role) ?? [],
+          }))
+          .filter((u) => u.roles.includes("lecturer") || u.roles.includes("moderator"));
+        setUsers(mapped);
+      }
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const lecturers = users.filter((u) => u.roles.includes("lecturer"));

@@ -6,7 +6,6 @@ import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, CheckCircle, Pencil, Loader2 } from "lucide-react";
 import { useAssessmentsWithQuestions, useModerationComments, useSaveComment, useUpdateAssessmentStatus, useLogActivity } from "@/hooks/useData";
-import { sampleAssessments } from "@/lib/mockData";
 import { useToast } from "@/hooks/use-toast";
 
 const statusStyles: Record<string, string> = {
@@ -23,7 +22,7 @@ const HistoryPage = () => {
   const logActivity = useLogActivity();
   const saveComment = useSaveComment();
 
-  const assessments = dbAssessments && dbAssessments.length > 0 ? dbAssessments : sampleAssessments;
+  const assessments = dbAssessments ?? [];
 
   const history = assessments.filter(
     (a) => a.status === "Approved" || a.status === "Rejected" || a.status === "Reviewed"

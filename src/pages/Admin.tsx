@@ -44,45 +44,58 @@ export default function Admin() {
   }, []);
 
   const fetchUsers = async () => {
-    const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, department");
-    const { data: roles } = await supabase.from("user_roles").select("user_id, role");
+    try {
+      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, department");
+      const { data: roles } = await supabase.from("user_roles").select("user_id, role");
 
-    if (profiles) {
-      const mapped = profiles.map((p) => ({
-        user_id: p.user_id,
-        full_name: p.full_name,
-        department: p.department,
-        roles: roles?.filter((r) => r.user_id === p.user_id).map((r) => r.role) ?? [],
-      }));
-      setUsers(mapped);
+      if (profiles) {
+        const mapped = profiles.map((p) => ({
+          user_id: p.user_id,
+          full_name: p.full_name,
+          department: p.department,
+          roles: roles?.filter((r) => r.user_id === p.user_id).map((r) => r.role) ?? [],
+        }));
+        setUsers(mapped);
+      }
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fetchSettings = async () => {
-    const { data } = await supabase.from("system_settings").select("key, value");
-    if (data) {
-      const sim = data.find((s) => s.key === "similarity_threshold");
-      const comp = data.find((s) => s.key === "complexity_threshold");
-      if (sim) setSimilarityThreshold(Number(JSON.parse(JSON.stringify(sim.value))));
-      if (comp) setComplexityThreshold(Number(JSON.parse(JSON.stringify(comp.value))));
+    try {
+      const { data } = await supabase.from("system_settings").select("key, value");
+      if (data) {
+        const sim = data.find((s) => s.key === "similarity_threshold");
+        const comp = data.find((s) => s.key === "complexity_threshold");
+        if (sim) setSimilarityThreshold(Number(JSON.parse(JSON.stringify(sim.value))));
+        if (comp) setComplexityThreshold(Number(JSON.parse(JSON.stringify(comp.value))));
+      }
+    } catch {
+      // Use defaults if system_settings not available
     }
   };
 
   const fetchModeratorModules = async () => {
-    const { data } = await supabase.from("moderator_modules").select("*");
-    if (data) {
-      // We'll merge with profiles to get names
-      const userIds = [...new Set(data.map((d: any) => d.user_id))];
-      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
-      const nameMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p.full_name ?? "Unknown"]));
-      
-      setModeratorModules(data.map((d: any) => ({
-        id: d.id,
-        user_id: d.user_id,
-        module_code: d.module_code,
-        moderator_name: nameMap.get(d.user_id) ?? "Unknown",
-      })));
+    try {
+      const { data } = await supabase.from("moderator_modules").select("*");
+      if (data && data.length > 0) {
+        const userIds = [...new Set(data.map((d: any) => d.user_id))];
+        const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
+        const nameMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p.full_name ?? "Unknown"]));
+        setModeratorModules(data.map((d: any) => ({
+          id: d.id,
+          user_id: d.user_id,
+          module_code: d.module_code,
+          moderator_name: nameMap.get(d.user_id) ?? "Unknown",
+        })));
+      } else {
+        setModeratorModules([]);
+      }
+    } catch {
+      setModeratorModules([]);
     }
   };
 

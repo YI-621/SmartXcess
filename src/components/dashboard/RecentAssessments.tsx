@@ -1,7 +1,7 @@
-import { sampleAssessments } from "@/lib/mockData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
+import { useAssessmentsWithQuestions } from "@/hooks/useData";
 
 const statusStyles: Record<string, string> = {
   Pending: "bg-warning/10 text-warning border-warning/20",
@@ -12,6 +12,8 @@ const statusStyles: Record<string, string> = {
 
 export function RecentAssessments() {
   const navigate = useNavigate();
+  const { data: assessments } = useAssessmentsWithQuestions();
+  const recentAssessments = (assessments ?? []).slice(0, 10);
 
   return (
     <div className="rounded-xl border border-border bg-card animate-fade-in">
@@ -25,7 +27,7 @@ export function RecentAssessments() {
         </button>
       </div>
       <div className="divide-y divide-border">
-        {sampleAssessments.map((a) => (
+        {recentAssessments.map((a) => (
           <div
             key={a.id}
             className="flex items-center justify-between px-5 py-3.5 hover:bg-muted/50 transition-colors cursor-pointer"
@@ -43,6 +45,9 @@ export function RecentAssessments() {
             </div>
           </div>
         ))}
+        {recentAssessments.length === 0 && (
+          <p className="text-sm text-muted-foreground px-5 py-6 text-center">No assessments yet</p>
+        )}
       </div>
     </div>
   );

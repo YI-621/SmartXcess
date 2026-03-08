@@ -107,17 +107,29 @@ export type Database = {
         Row: {
           id: number
           question_id: string
+          module_code: string
+          exam_year: string
+          exam_month: string
           question_text: string
+          embedding: number[] | null
         }
         Insert: {
           id?: never
           question_id: string
+          module_code: string
+          exam_year: string
+          exam_month: string
           question_text: string
+          embedding?: number[] | null
         }
         Update: {
           id?: never
           question_id?: string
+          module_code?: string
+          exam_year?: string
+          exam_month?: string
           question_text?: string
+          embedding?: number[] | null
         }
         Relationships: []
       }

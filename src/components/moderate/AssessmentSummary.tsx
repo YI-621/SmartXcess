@@ -1,4 +1,4 @@
-import { type Assessment } from "@/lib/mockData";
+import { type Assessment } from "@/lib/assessment";
 import { cn } from "@/lib/utils";
 
 interface AssessmentSummaryProps {

@@ -4,7 +4,6 @@ import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, MessageSquare } from "lucide-react";
 import { useAssessmentWithQuestions, useModerationComments } from "@/hooks/useData";
-import { sampleAssessments } from "@/lib/mockData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -32,8 +31,7 @@ const AssessmentDetail = () => {
   const id = searchParams.get("id");
 
   const { data: dbAssessment, isLoading } = useAssessmentWithQuestions(id);
-  const mockAssessment = sampleAssessments.find((a) => a.id === id) || sampleAssessments[0];
-  const assessment = dbAssessment ?? mockAssessment;
+  const assessment = dbAssessment;
 
   const questionIds = assessment?.questions.map((q) => q.id) ?? [];
   const { data: dbComments } = useModerationComments(questionIds);

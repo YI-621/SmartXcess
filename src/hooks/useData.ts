@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import type { Assessment, Question, ModerationDetails } from "@/lib/mockData";
+import type { Assessment, Question, ModerationDetails } from "@/lib/assessment";
 
 // Types matching the database
 export interface DbAssessment {
@@ -98,12 +98,16 @@ export function useAssessments() {
   return useQuery({
     queryKey: ["assessments"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("assessments")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as DbAssessment[];
+      try {
+        const { data, error } = await supabase
+          .from("assessments")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        return (data ?? []) as DbAssessment[];
+      } catch {
+        return [] as DbAssessment[];
+      }
     },
   });
 }
@@ -113,43 +117,46 @@ export function useAssessmentWithQuestions(id: string | null) {
     queryKey: ["assessment", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data: assessment, error: aErr } = await supabase
-        .from("assessments")
-        .select("*")
-        .eq("id", id!)
-        .single();
-      if (aErr) throw aErr;
+      try {
+        const { data: assessment, error: aErr } = await supabase
+          .from("assessments")
+          .select("*")
+          .eq("id", id!)
+          .single();
+        if (aErr) throw aErr;
 
-      const { data: questions, error: qErr } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("assessment_id", id!)
-        .order("question_order");
-      if (qErr) throw qErr;
+        const { data: questions, error: qErr } = await supabase
+          .from("questions")
+          .select("*")
+          .eq("assessment_id", id!)
+          .order("question_order");
+        if (qErr) throw qErr;
 
-      // Fetch lecturer name
-      const { data: lecturerProfile } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("user_id", (assessment as DbAssessment).lecturer_id)
-        .single();
-
-      let moderatorName: string | undefined;
-      if ((assessment as DbAssessment).moderator_id) {
-        const { data: modProfile } = await supabase
+        const { data: lecturerProfile } = await supabase
           .from("profiles")
           .select("full_name")
-          .eq("user_id", (assessment as DbAssessment).moderator_id!)
+          .eq("user_id", (assessment as DbAssessment).lecturer_id)
           .single();
-        moderatorName = modProfile?.full_name ?? undefined;
-      }
 
-      return toFrontendAssessment(
-        assessment as DbAssessment,
-        (questions ?? []) as DbQuestion[],
-        lecturerProfile?.full_name ?? "Unknown",
-        moderatorName
-      );
+        let moderatorName: string | undefined;
+        if ((assessment as DbAssessment).moderator_id) {
+          const { data: modProfile } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("user_id", (assessment as DbAssessment).moderator_id!)
+            .single();
+          moderatorName = modProfile?.full_name ?? undefined;
+        }
+
+        return toFrontendAssessment(
+          assessment as DbAssessment,
+          (questions ?? []) as DbQuestion[],
+          lecturerProfile?.full_name ?? "Unknown",
+          moderatorName
+        );
+      } catch {
+        return null;
+      }
     },
   });
 }
@@ -158,41 +165,44 @@ export function useAssessmentsWithQuestions() {
   return useQuery({
     queryKey: ["assessments-full"],
     queryFn: async () => {
-      const { data: assessments, error: aErr } = await supabase
-        .from("assessments")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (aErr) throw aErr;
-      if (!assessments || assessments.length === 0) return [];
+      try {
+        const { data: assessments, error: aErr } = await supabase
+          .from("assessments")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (aErr) throw aErr;
+        if (!assessments || assessments.length === 0) return [];
 
-      const ids = assessments.map((a: any) => a.id);
-      const { data: questions, error: qErr } = await supabase
-        .from("questions")
-        .select("*")
-        .in("assessment_id", ids)
-        .order("question_order");
-      if (qErr) throw qErr;
+        const ids = assessments.map((a: any) => a.id);
+        const { data: questions, error: qErr } = await supabase
+          .from("questions")
+          .select("*")
+          .in("assessment_id", ids)
+          .order("question_order");
+        if (qErr) throw qErr;
 
-      // Fetch all relevant profiles
-      const userIds = [...new Set([
-        ...assessments.map((a: any) => a.lecturer_id),
-        ...assessments.filter((a: any) => a.moderator_id).map((a: any) => a.moderator_id),
-      ])];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("user_id, full_name")
-        .in("user_id", userIds);
+        const userIds = [...new Set([
+          ...assessments.map((a: any) => a.lecturer_id),
+          ...assessments.filter((a: any) => a.moderator_id).map((a: any) => a.moderator_id),
+        ])];
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, full_name")
+          .in("user_id", userIds);
 
-      const profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p.full_name ?? "Unknown"]));
+        const profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p.full_name ?? "Unknown"]));
 
-      return assessments.map((a: any) =>
-        toFrontendAssessment(
-          a as DbAssessment,
-          ((questions ?? []) as DbQuestion[]).filter((q) => q.assessment_id === a.id),
-          profileMap.get(a.lecturer_id) ?? "Unknown",
-          a.moderator_id ? profileMap.get(a.moderator_id) : undefined
-        )
-      );
+        return assessments.map((a: any) =>
+          toFrontendAssessment(
+            a as DbAssessment,
+            ((questions ?? []) as DbQuestion[]).filter((q) => q.assessment_id === a.id),
+            profileMap.get(a.lecturer_id) ?? "Unknown",
+            a.moderator_id ? profileMap.get(a.moderator_id) : undefined
+          )
+        );
+      } catch {
+        return [];
+      }
     },
   });
 }
@@ -202,13 +212,17 @@ export function useQuestions(assessmentId: string | null) {
     queryKey: ["questions", assessmentId],
     enabled: !!assessmentId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("assessment_id", assessmentId!)
-        .order("question_order");
-      if (error) throw error;
-      return (data ?? []) as DbQuestion[];
+      try {
+        const { data, error } = await supabase
+          .from("questions")
+          .select("*")
+          .eq("assessment_id", assessmentId!)
+          .order("question_order");
+        if (error) throw error;
+        return (data ?? []) as DbQuestion[];
+      } catch {
+        return [] as DbQuestion[];
+      }
     },
   });
 }
@@ -218,12 +232,16 @@ export function useModerationComments(questionIds: string[]) {
     queryKey: ["moderation-comments", questionIds],
     enabled: questionIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("moderation_comments")
-        .select("*")
-        .in("question_id", questionIds);
-      if (error) throw error;
-      return (data ?? []) as DbModerationComment[];
+      try {
+        const { data, error } = await supabase
+          .from("moderation_comments")
+          .select("*")
+          .in("question_id", questionIds);
+        if (error) throw error;
+        return (data ?? []) as DbModerationComment[];
+      } catch {
+        return [] as DbModerationComment[];
+      }
     },
   });
 }
@@ -284,13 +302,17 @@ export function useActivityLogs() {
   return useQuery({
     queryKey: ["activity-logs"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("activity_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (error) throw error;
-      return (data ?? []) as DbActivityLog[];
+      try {
+        const { data, error } = await supabase
+          .from("activity_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (error) throw error;
+        return (data ?? []) as DbActivityLog[];
+      } catch {
+        return [] as DbActivityLog[];
+      }
     },
   });
 }
@@ -325,13 +347,17 @@ export function useUserModules() {
     queryKey: ["user-modules", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("user_modules")
-        .select("*")
-        .eq("user_id", user!.id)
-        .order("created_at");
-      if (error) throw error;
-      return (data ?? []) as DbUserModule[];
+      try {
+        const { data, error } = await supabase
+          .from("user_modules")
+          .select("*")
+          .eq("user_id", user!.id)
+          .order("created_at");
+        if (error) throw error;
+        return (data ?? []) as DbUserModule[];
+      } catch {
+        return [] as DbUserModule[];
+      }
     },
   });
 }
@@ -381,6 +407,52 @@ export function useLecturerCount() {
         .eq("role", "lecturer");
       if (error) throw error;
       return data?.length ?? 0;
+    },
+  });
+}
+
+// Exam questions from DB (profiles, system_settings, exam_questions, user_details_view)
+export interface DbExamQuestion {
+  id: number;
+  question_id: string;
+  module_code: string;
+  exam_year: string;
+  exam_month: string;
+  question_text: string;
+  embedding: number[] | null;
+}
+
+export function useExamQuestions(moduleCode?: string | null) {
+  return useQuery({
+    queryKey: ["exam-questions", moduleCode],
+    queryFn: async () => {
+      let q = supabase.from("exam_questions").select("id, question_id, module_code, exam_year, exam_month, question_text");
+      if (moduleCode) q = q.eq("module_code", moduleCode);
+      const { data, error } = await q.order("id");
+      if (error) throw error;
+      return (data ?? []) as DbExamQuestion[];
+    },
+  });
+}
+
+export function useSystemSettings() {
+  return useQuery({
+    queryKey: ["system-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("system_settings").select("key, value");
+      if (error) throw error;
+      return (data ?? []) as { key: string; value: unknown }[];
+    },
+  });
+}
+
+export function useUserDetails() {
+  return useQuery({
+    queryKey: ["user-details"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("user_details_view").select("*");
+      if (error) throw error;
+      return (data ?? []) as { user_id: string; full_name: string | null; department: string | null; email: string | null; role: string }[];
     },
   });
 }
