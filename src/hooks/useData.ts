@@ -117,7 +117,6 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
       question_id: row.question_id ?? undefined,
       grammar_errors: row.grammar_spelling_error ?? undefined,
       grammar_structure: row.grammar_structure ?? undefined,
-      relevancy_to_scope: row.relevancy_to_scope ?? undefined,
       suggestion: row.suggestion ?? undefined,
       validated_bloom_keywords: row.validated_bloom_keywords ?? undefined,
       raw_complexity: row.complexity ?? undefined,
@@ -285,21 +284,45 @@ export function useModerationComments(questionIds: string[]) {
     queryKey: ["moderation-comments", questionIds],
     enabled: questionIds.length > 0,
     queryFn: async () => {
-      return [] as DbModerationComment[];
+      const { data, error } = await supabase
+        .from("question_analysis_results")
+        .select("id, question_id, similarity_reason, uploaded_by, created_at")
+        .in("question_id", questionIds);
+
+      if (error) throw error;
+
+      return (data ?? [])
+        .filter((row) => (row.similarity_reason ?? "").trim().length > 0)
+        .map((row) => ({
+          id: row.id,
+          question_id: row.question_id ?? row.id,
+          user_id: row.uploaded_by ?? "unknown",
+          comment: row.similarity_reason ?? "",
+          created_at: row.created_at ?? new Date().toISOString(),
+          updated_at: row.created_at ?? new Date().toISOString(),
+        })) as DbModerationComment[];
     },
   });
 }
 
 export function useSaveComment() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async ({ questionId, comment }: { questionId: string; comment: string }) => {
-      if (!user || !questionId || comment === undefined) return;
+      if (!questionId || comment === undefined) return;
+
+      const { error } = await supabase
+        .from("question_analysis_results")
+        .update({ similarity_reason: comment })
+        .eq("question_id", questionId);
+
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["moderation-comments"] });
+      queryClient.invalidateQueries({ queryKey: ["assessments-full"] });
+      queryClient.invalidateQueries({ queryKey: ["assessment"] });
     },
   });
 }
