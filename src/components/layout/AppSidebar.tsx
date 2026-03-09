@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const roleNavItems: Record<string, { to: string; icon: any; label: string }[]> = {
   lecturer: [
-    { to: "/", icon: Home, label: "Dashboard" },
+    { to: "/dashboard", icon: Home, label: "Dashboard" },
     { to: "/assessments", icon: FileText, label: "Assessments" },
   ],
   moderator: [
@@ -14,7 +14,7 @@ const roleNavItems: Record<string, { to: string; icon: any; label: string }[]> =
     { to: "/history", icon: History, label: "History" },
   ],
   admin: [
-    { to: "/", icon: Home, label: "Dashboard" },
+    { to: "/dashboard", icon: Home, label: "Dashboard" },
     { to: "/admin-assessments", icon: FileText, label: "Assessments" },
     { to: "/supervision", icon: Users, label: "Supervision" },
     { to: "/admin", icon: Shield, label: "Admin" },

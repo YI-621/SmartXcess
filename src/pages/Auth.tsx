@@ -30,6 +30,7 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const emailRedirectTo = new URL(`${import.meta.env.BASE_URL}#/auth`, window.location.origin).toString();
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -41,7 +42,7 @@ export default function Auth() {
         toast({ title: "Login failed", description: error.message, variant: "destructive" });
       } else {
         await sendAuditLog("SUCCESSFUL_LOGIN", "Authentication System");
-        navigate("/");
+        navigate("/dashboard");
       }
     } else {
       const { error } = await supabase.auth.signUp({
@@ -49,7 +50,7 @@ export default function Auth() {
         password,
         options: {
           data: { full_name: fullName, department },
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo,
         },
       });
       if (error) {

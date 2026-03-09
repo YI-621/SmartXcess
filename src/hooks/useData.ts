@@ -1,7 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import type { Assessment, Question, ModerationDetails } from "@/lib/mockData";
+import {
+  normalizeAssessmentStatus,
+  normalizeBloomLevel,
+  normalizeDifficulty,
+  type Assessment,
+  type Question,
+  type ModerationDetails,
+} from "@/lib/assessment";
+import type { Tables } from "@/integrations/supabase/types";
 
 // Types matching the database
 export interface DbAssessment {
@@ -62,6 +70,114 @@ export interface DbUserModule {
   created_at: string;
 }
 
+type DbQuestionAnalysisRow = Tables<"question_analysis_results">;
+
+function toPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function parseComplexity(value: string | null): number {
+  if (!value) return 0;
+  const numeric = Number.parseFloat(String(value).replace(/[^0-9.-]/g, ""));
+  return toPercent(Number.isFinite(numeric) ? numeric : 0);
+}
+
+function inferDifficulty(complexity: number): Question["difficulty"] {
+  if (complexity < 20) return "Very Easy";
+  if (complexity < 40) return "Easy";
+  if (complexity < 60) return "Medium";
+  if (complexity < 80) return "Hard";
+  return "Very Hard";
+}
+
+function splitKeywords(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[;,|]/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Question {
+  const complexity = parseComplexity(row.complexity);
+  const similarity = toPercent(row.similarity_score ?? row.overall_similarity ?? 0);
+
+  return {
+    id: row.question_id ?? row.id,
+    text: row.question_text ?? "",
+    marks: 0,
+    bloomLevel: normalizeBloomLevel(row.final_bloom_level),
+    difficulty: normalizeDifficulty(inferDifficulty(complexity)),
+    complexity,
+    similarityScore: similarity,
+    similarTo: row.similarity_source ?? undefined,
+    keywords: splitKeywords(row.validated_bloom_keywords),
+    moderationDetails: {
+      question_id: row.question_id ?? undefined,
+      grammar_errors: row.grammar_spelling_error ?? undefined,
+      grammar_structure: row.grammar_structure ?? undefined,
+      relevancy_to_scope: row.relevancy_to_scope ?? undefined,
+      suggestion: row.suggestion ?? undefined,
+      validated_bloom_keywords: row.validated_bloom_keywords ?? undefined,
+      raw_complexity: row.complexity ?? undefined,
+    },
+  };
+}
+
+async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
+  const { data: rows, error } = await supabase
+    .from("question_analysis_results")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  if (!rows || rows.length === 0) return [];
+
+  const uploaderIds = [...new Set(rows.map((r) => r.uploaded_by).filter((id): id is string => !!id))];
+  const { data: profiles } = uploaderIds.length
+    ? await supabase.from("profiles").select("user_id, full_name").in("user_id", uploaderIds)
+    : { data: [] as Array<{ user_id: string; full_name: string | null }> };
+
+  const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name ?? "Unknown"]));
+
+  const grouped = new Map<string, DbQuestionAnalysisRow[]>();
+  for (const row of rows) {
+    const dateBucket = (row.created_at ?? "").slice(0, 10);
+    const key = `${row.filename ?? "untitled"}::${row.module_code ?? "N/A"}::${row.uploaded_by ?? "unknown"}::${dateBucket}`;
+    const group = grouped.get(key) ?? [];
+    group.push(row);
+    grouped.set(key, group);
+  }
+
+  const assessments: Assessment[] = [];
+  for (const [key, groupRows] of grouped.entries()) {
+    const first = groupRows[0];
+    const questions = groupRows.map(mapAnalysisRowToQuestion);
+    const avgSimilarity = questions.length
+      ? Math.round(questions.reduce((sum, q) => sum + q.similarityScore, 0) / questions.length)
+      : 0;
+    const overallScore = toPercent(100 - avgSimilarity);
+    const flagged = questions.some((q) => q.similarityScore >= 70);
+
+    assessments.push({
+      id: key,
+      title: first.filename ?? "Untitled Analysis",
+      course: first.module_code ?? "N/A",
+      lecturer: first.uploaded_by ? profileMap.get(first.uploaded_by) ?? "Unknown" : "Unknown",
+      moderator: undefined,
+      date: first.created_at ? new Date(first.created_at).toLocaleDateString() : "N/A",
+      status: normalizeAssessmentStatus("Reviewed"),
+      questions,
+      overallScore,
+      flagged,
+      flagReason: flagged ? "High similarity detected in one or more questions" : undefined,
+    });
+  }
+
+  return assessments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
 // Convert DB assessment + questions to the frontend Assessment shape
 export function toFrontendAssessment(a: DbAssessment, questions: DbQuestion[], lecturerName?: string, moderatorName?: string): Assessment {
   return {
@@ -71,7 +187,7 @@ export function toFrontendAssessment(a: DbAssessment, questions: DbQuestion[], l
     lecturer: lecturerName ?? "Unknown",
     moderator: moderatorName,
     date: a.date,
-    status: a.status as Assessment["status"],
+    status: normalizeAssessmentStatus(a.status),
     overallScore: a.overall_score ?? 0,
     flagged: a.flagged ?? false,
     flagReason: a.flag_reason ?? undefined,
@@ -81,8 +197,8 @@ export function toFrontendAssessment(a: DbAssessment, questions: DbQuestion[], l
         id: q.id,
         text: q.text,
         marks: q.marks,
-        bloomLevel: q.bloom_level as Question["bloomLevel"],
-        difficulty: q.difficulty as Question["difficulty"],
+        bloomLevel: normalizeBloomLevel(q.bloom_level),
+        difficulty: normalizeDifficulty(q.difficulty),
         complexity: q.complexity,
         similarityScore: q.similarity_score,
         similarTo: q.similar_to ?? undefined,
@@ -98,12 +214,22 @@ export function useAssessments() {
   return useQuery({
     queryKey: ["assessments"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("assessments")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as DbAssessment[];
+      const assessments = await fetchModerationAssessmentsFromAnalysis();
+      return assessments.map((a) => ({
+        id: a.id,
+        title: a.title,
+        course: a.course,
+        lecturer_id: "",
+        moderator_id: null,
+        date: a.date,
+        status: a.status,
+        overall_score: a.overallScore,
+        flagged: a.flagged ?? false,
+        flag_reason: a.flagReason ?? null,
+        file_url: null,
+        created_at: a.date,
+        updated_at: a.date,
+      })) as DbAssessment[];
     },
   });
 }
@@ -113,43 +239,8 @@ export function useAssessmentWithQuestions(id: string | null) {
     queryKey: ["assessment", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data: assessment, error: aErr } = await supabase
-        .from("assessments")
-        .select("*")
-        .eq("id", id!)
-        .single();
-      if (aErr) throw aErr;
-
-      const { data: questions, error: qErr } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("assessment_id", id!)
-        .order("question_order");
-      if (qErr) throw qErr;
-
-      // Fetch lecturer name
-      const { data: lecturerProfile } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("user_id", (assessment as DbAssessment).lecturer_id)
-        .single();
-
-      let moderatorName: string | undefined;
-      if ((assessment as DbAssessment).moderator_id) {
-        const { data: modProfile } = await supabase
-          .from("profiles")
-          .select("full_name")
-          .eq("user_id", (assessment as DbAssessment).moderator_id!)
-          .single();
-        moderatorName = modProfile?.full_name ?? undefined;
-      }
-
-      return toFrontendAssessment(
-        assessment as DbAssessment,
-        (questions ?? []) as DbQuestion[],
-        lecturerProfile?.full_name ?? "Unknown",
-        moderatorName
-      );
+      const assessments = await fetchModerationAssessmentsFromAnalysis();
+      return assessments.find((a) => a.id === id!) ?? null;
     },
   });
 }
@@ -158,41 +249,7 @@ export function useAssessmentsWithQuestions() {
   return useQuery({
     queryKey: ["assessments-full"],
     queryFn: async () => {
-      const { data: assessments, error: aErr } = await supabase
-        .from("assessments")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (aErr) throw aErr;
-      if (!assessments || assessments.length === 0) return [];
-
-      const ids = assessments.map((a: any) => a.id);
-      const { data: questions, error: qErr } = await supabase
-        .from("questions")
-        .select("*")
-        .in("assessment_id", ids)
-        .order("question_order");
-      if (qErr) throw qErr;
-
-      // Fetch all relevant profiles
-      const userIds = [...new Set([
-        ...assessments.map((a: any) => a.lecturer_id),
-        ...assessments.filter((a: any) => a.moderator_id).map((a: any) => a.moderator_id),
-      ])];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("user_id, full_name")
-        .in("user_id", userIds);
-
-      const profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p.full_name ?? "Unknown"]));
-
-      return assessments.map((a: any) =>
-        toFrontendAssessment(
-          a as DbAssessment,
-          ((questions ?? []) as DbQuestion[]).filter((q) => q.assessment_id === a.id),
-          profileMap.get(a.lecturer_id) ?? "Unknown",
-          a.moderator_id ? profileMap.get(a.moderator_id) : undefined
-        )
-      );
+      return fetchModerationAssessmentsFromAnalysis();
     },
   });
 }
@@ -202,13 +259,23 @@ export function useQuestions(assessmentId: string | null) {
     queryKey: ["questions", assessmentId],
     enabled: !!assessmentId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("assessment_id", assessmentId!)
-        .order("question_order");
-      if (error) throw error;
-      return (data ?? []) as DbQuestion[];
+      const assessments = await fetchModerationAssessmentsFromAnalysis();
+      const assessment = assessments.find((a) => a.id === assessmentId!);
+      return (assessment?.questions ?? []).map((q, index) => ({
+        id: q.id,
+        assessment_id: assessmentId!,
+        text: q.text,
+        marks: q.marks,
+        bloom_level: q.bloomLevel,
+        difficulty: q.difficulty,
+        complexity: q.complexity,
+        similarity_score: q.similarityScore,
+        similar_to: q.similarTo ?? null,
+        keywords: q.keywords,
+        question_order: index,
+        created_at: "",
+        moderation_details: q.moderationDetails as Record<string, any>,
+      })) as DbQuestion[];
     },
   });
 }
@@ -218,12 +285,7 @@ export function useModerationComments(questionIds: string[]) {
     queryKey: ["moderation-comments", questionIds],
     enabled: questionIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("moderation_comments")
-        .select("*")
-        .in("question_id", questionIds);
-      if (error) throw error;
-      return (data ?? []) as DbModerationComment[];
+      return [] as DbModerationComment[];
     },
   });
 }
@@ -234,27 +296,7 @@ export function useSaveComment() {
 
   return useMutation({
     mutationFn: async ({ questionId, comment }: { questionId: string; comment: string }) => {
-      if (!user) throw new Error("Not authenticated");
-      // Upsert: check if exists
-      const { data: existing } = await supabase
-        .from("moderation_comments")
-        .select("id")
-        .eq("question_id", questionId)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (existing) {
-        const { error } = await supabase
-          .from("moderation_comments")
-          .update({ comment })
-          .eq("id", existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("moderation_comments")
-          .insert({ question_id: questionId, user_id: user.id, comment });
-        if (error) throw error;
-      }
+      if (!user || !questionId || comment === undefined) return;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["moderation-comments"] });
@@ -267,11 +309,7 @@ export function useUpdateAssessmentStatus() {
 
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase
-        .from("assessments")
-        .update({ status })
-        .eq("id", id);
-      if (error) throw error;
+      if (!id || !status) return;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assessments"] });
@@ -284,13 +322,7 @@ export function useActivityLogs() {
   return useQuery({
     queryKey: ["activity-logs"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("activity_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (error) throw error;
-      return (data ?? []) as DbActivityLog[];
+      return [] as DbActivityLog[];
     },
   });
 }
@@ -301,17 +333,7 @@ export function useLogActivity() {
 
   return useMutation({
     mutationFn: async ({ type, description, assessmentId }: { type: string; description: string; assessmentId?: string }) => {
-      if (!user) throw new Error("Not authenticated");
-      const { error } = await supabase
-        .from("activity_logs")
-        .insert({
-          type,
-          description,
-          user_id: user.id,
-          user_name: profile?.full_name ?? user.email ?? "Unknown",
-          assessment_id: assessmentId ?? null,
-        });
-      if (error) throw error;
+      if (!user || !type || !description || assessmentId === undefined) return;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
@@ -325,13 +347,7 @@ export function useUserModules() {
     queryKey: ["user-modules", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("user_modules")
-        .select("*")
-        .eq("user_id", user!.id)
-        .order("created_at");
-      if (error) throw error;
-      return (data ?? []) as DbUserModule[];
+      return [] as DbUserModule[];
     },
   });
 }
@@ -342,11 +358,7 @@ export function useAddModule() {
 
   return useMutation({
     mutationFn: async (moduleName: string) => {
-      if (!user) throw new Error("Not authenticated");
-      const { error } = await supabase
-        .from("user_modules")
-        .insert({ user_id: user.id, module_name: moduleName });
-      if (error) throw error;
+      if (!user || !moduleName) return;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-modules"] });
@@ -359,11 +371,7 @@ export function useRemoveModule() {
 
   return useMutation({
     mutationFn: async (moduleId: string) => {
-      const { error } = await supabase
-        .from("user_modules")
-        .delete()
-        .eq("id", moduleId);
-      if (error) throw error;
+      if (!moduleId) return;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-modules"] });

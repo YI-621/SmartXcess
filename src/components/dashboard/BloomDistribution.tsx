@@ -1,4 +1,5 @@
-import { sampleQuestions, type BloomLevel } from "@/lib/mockData";
+import { type BloomLevel } from "@/lib/assessment";
+import { useAssessmentsWithQuestions } from "@/hooks/useData";
 
 const bloomLevels: { level: BloomLevel; color: string }[] = [
   { level: "Knowledge", color: "bg-bloom-remember" },
@@ -10,9 +11,12 @@ const bloomLevels: { level: BloomLevel; color: string }[] = [
 ];
 
 export function BloomDistribution() {
+  const { data: assessments = [] } = useAssessmentsWithQuestions();
+  const questions = assessments.flatMap((a) => a.questions);
+
   const counts = bloomLevels.map((b) => ({
     ...b,
-    count: sampleQuestions.filter((q) => q.bloomLevel === b.level).length,
+    count: questions.filter((q) => q.bloomLevel === b.level).length,
   }));
   const max = Math.max(...counts.map((c) => c.count), 1);
 

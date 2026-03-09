@@ -5,7 +5,7 @@ import { RecentAssessments } from "@/components/dashboard/RecentAssessments";
 import { BloomDistribution } from "@/components/dashboard/BloomDistribution";
 import { useAuth } from "@/hooks/useAuth";
 import { useAssessmentsWithQuestions, useActivityLogs, useLecturerCount } from "@/hooks/useData";
-import { sampleAssessments, sampleQuestions, sampleActivityLogs, type BloomLevel } from "@/lib/mockData";
+import { type BloomLevel, type Assessment } from "@/lib/assessment";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import type { Assessment } from "@/lib/mockData";
 
 const statusStyles: Record<string, string> = {
   Pending: "bg-warning/10 text-warning border-warning/20",
@@ -102,7 +101,7 @@ function useChartData(assessments: Assessment[]) {
 
 function LecturerDashboard() {
   const { data: dbAssessments, isLoading } = useAssessmentsWithQuestions();
-  const assessments = dbAssessments && dbAssessments.length > 0 ? dbAssessments : sampleAssessments;
+  const assessments = dbAssessments ?? [];
   const { bloomData, difficultyData, allQuestions } = useChartData(assessments);
 
   const pending = assessments.filter((a) => a.status === "Pending").length;
@@ -159,10 +158,14 @@ function AdminDashboard() {
   const { data: dbActivityLogs } = useActivityLogs();
   const { data: lecturerCount } = useLecturerCount();
 
-  const assessments = dbAssessments && dbAssessments.length > 0 ? dbAssessments : sampleAssessments;
-  const activityLogs = dbActivityLogs && dbActivityLogs.length > 0
-    ? dbActivityLogs.map((l) => ({ id: l.id, type: l.type, description: l.description, user: l.user_name ?? "Unknown", timestamp: new Date(l.created_at).toLocaleString() }))
-    : sampleActivityLogs;
+  const assessments = dbAssessments ?? [];
+  const activityLogs = (dbActivityLogs ?? []).map((l) => ({
+    id: l.id,
+    type: l.type,
+    description: l.description,
+    user: l.user_name ?? "Unknown",
+    timestamp: new Date(l.created_at).toLocaleString(),
+  }));
 
   const { bloomData, difficultyData } = useChartData(assessments);
 

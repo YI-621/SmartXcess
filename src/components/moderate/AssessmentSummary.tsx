@@ -1,4 +1,4 @@
-import { type Assessment } from "@/lib/mockData";
+import { type Assessment } from "@/lib/assessment";
 import { cn } from "@/lib/utils";
 
 interface AssessmentSummaryProps {
@@ -27,7 +27,7 @@ export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
           { label: "Avg Complexity", value: `${avgComplexity}%` },
           { label: "Avg Similarity", value: `${avgSimilarity}%` },
           { label: "Bloom Levels", value: `${bloomCoverage}/6` },
-          { label: "Difficulty Mix", value: `${new Set(assessment.questions.map((q) => q.difficulty)).size}/3` },
+          { label: "Difficulty Mix", value: `${new Set(assessment.questions.map((q) => q.difficulty)).size}/5` },
         ].map((s) => (
           <div key={s.label} className="rounded-lg bg-muted/50 p-3">
             <p className="text-lg font-bold font-mono text-card-foreground">{s.value}</p>

@@ -63,7 +63,7 @@ export default function Profile() {
     switchRole(role as any);
     toast({ title: `Switched to ${role} view` });
     if (role === "moderator") navigate("/moderate");
-    else if (role === "lecturer") navigate("/");
+    else if (role === "lecturer") navigate("/dashboard");
   };
 
   const roleBadgeVariant = (role: string) => {

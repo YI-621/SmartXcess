@@ -1,28 +1,35 @@
-import { sampleAssessments, sampleQuestions, type BloomLevel } from "@/lib/mockData";
+import { type BloomLevel } from "@/lib/assessment";
+import { useAssessmentsWithQuestions } from "@/hooks/useData";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
-const bloomData: { name: BloomLevel; count: number; color: string }[] = [
-  { name: "Knowledge", count: sampleQuestions.filter((q) => q.bloomLevel === "Knowledge").length, color: "hsl(280, 67%, 50%)" },
-  { name: "Comprehension", count: sampleQuestions.filter((q) => q.bloomLevel === "Comprehension").length, color: "hsl(234, 89%, 56%)" },
-  { name: "Application", count: sampleQuestions.filter((q) => q.bloomLevel === "Application").length, color: "hsl(199, 89%, 48%)" },
-  { name: "Analysis", count: sampleQuestions.filter((q) => q.bloomLevel === "Analysis").length, color: "hsl(142, 71%, 45%)" },
-  { name: "Synthesis", count: sampleQuestions.filter((q) => q.bloomLevel === "Synthesis").length, color: "hsl(38, 92%, 50%)" },
-  { name: "Evaluation", count: sampleQuestions.filter((q) => q.bloomLevel === "Evaluation").length, color: "hsl(0, 72%, 51%)" },
-];
+const Analytics = () => {
+  const { data: assessments = [] } = useAssessmentsWithQuestions();
+  const questions = assessments.flatMap((a) => a.questions);
 
-const difficultyData = [
-  { name: "Easy", count: sampleQuestions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
-  { name: "Medium", count: sampleQuestions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
-  { name: "Hard", count: sampleQuestions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
-];
+  const bloomData: { name: BloomLevel; count: number; color: string }[] = [
+    { name: "Knowledge", count: questions.filter((q) => q.bloomLevel === "Knowledge").length, color: "hsl(280, 67%, 50%)" },
+    { name: "Comprehension", count: questions.filter((q) => q.bloomLevel === "Comprehension").length, color: "hsl(234, 89%, 56%)" },
+    { name: "Application", count: questions.filter((q) => q.bloomLevel === "Application").length, color: "hsl(199, 89%, 48%)" },
+    { name: "Analysis", count: questions.filter((q) => q.bloomLevel === "Analysis").length, color: "hsl(142, 71%, 45%)" },
+    { name: "Synthesis", count: questions.filter((q) => q.bloomLevel === "Synthesis").length, color: "hsl(38, 92%, 50%)" },
+    { name: "Evaluation", count: questions.filter((q) => q.bloomLevel === "Evaluation").length, color: "hsl(0, 72%, 51%)" },
+  ];
 
-const complexityData = sampleQuestions.map((q, i) => ({
-  name: `Q${i + 1}`,
-  complexity: q.complexity,
-  similarity: q.similarityScore,
-}));
+  const difficultyData = [
+    { name: "Very Easy", count: questions.filter((q) => q.difficulty === "Very Easy").length, color: "hsl(160, 84%, 39%)" },
+    { name: "Easy", count: questions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
+    { name: "Medium", count: questions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
+    { name: "Hard", count: questions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
+    { name: "Very Hard", count: questions.filter((q) => q.difficulty === "Very Hard").length, color: "hsl(0, 72%, 35%)" },
+  ];
 
-const Analytics = () => (
+  const complexityData = questions.map((q, i) => ({
+    name: `Q${i + 1}`,
+    complexity: q.complexity,
+    similarity: q.similarityScore,
+  }));
+
+  return (
   <div className="space-y-6">
     <div>
       <h2 className="text-xl font-bold text-foreground">Analytics</h2>
@@ -73,6 +80,7 @@ const Analytics = () => (
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default Analytics;
