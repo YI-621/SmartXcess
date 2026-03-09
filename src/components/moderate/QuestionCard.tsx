@@ -1,4 +1,4 @@
-import { type Question, bloomColors, difficultyColors, type ModerationDetails } from "@/lib/assessment";
+import { type Question } from "@/lib/assessment";
 import { AlertTriangle, CheckCircle2, MessageSquare, FileWarning, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -11,28 +11,34 @@ interface QuestionCardProps {
   readOnly?: boolean;
 }
 
-const complexityLevels = [
-  { label: "Very Easy", min: 0, max: 20, color: "bg-emerald-400" },
-  { label: "Easy", min: 20, max: 40, color: "bg-green-500" },
-  { label: "Medium", min: 40, max: 60, color: "bg-yellow-500" },
-  { label: "Hard", min: 60, max: 80, color: "bg-orange-500" },
-  { label: "Very Hard", min: 80, max: 100, color: "bg-red-500" },
+const difficultyIndicatorSteps: Array<{ level: Question["difficulty"]; color: string }> = [
+  { level: "Very Easy", color: "bg-emerald-400" },
+  { level: "Easy", color: "bg-green-500" },
+  { level: "Medium", color: "bg-yellow-500" },
+  { level: "Hard", color: "bg-orange-500" },
+  { level: "Very Hard", color: "bg-red-500" },
 ];
 
-function ComplexityBars({ value }: { value: number }) {
+function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) {
+  const activeIndex = difficultyIndicatorSteps.findIndex((step) => step.level === difficulty);
+
   return (
-    <div className="space-y-1">
+    <div aria-label={`Difficulty indicator: ${difficulty}`} className="space-y-1">
       <div className="flex justify-between text-[10px]">
-        <span className="text-muted-foreground">Complexity</span>
-        <span className="font-mono font-medium text-card-foreground">{value}%</span>
+        <span className="text-muted-foreground">Difficulty</span>
       </div>
       <div className="flex gap-1">
-        {complexityLevels.map((level) => {
-          const isActive = value >= level.min;
+        {difficultyIndicatorSteps.map((step, index) => {
+          const isActive = index <= activeIndex;
           return (
-            <div key={level.label} className="flex-1 flex flex-col items-center gap-0.5">
-              <div className={cn("h-2 w-full rounded-sm transition-all", isActive ? level.color : "bg-muted")} />
-              <span className="text-[8px] text-muted-foreground leading-none">{level.label}</span>
+            <div key={step.level} className="flex-1">
+              <div
+                className={cn(
+                  "h-2 w-full rounded-sm transition-all",
+                  isActive ? step.color : "bg-muted",
+                  index === activeIndex && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
+                )}
+              />
             </div>
           );
         })}
@@ -71,22 +77,8 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
         <span className="shrink-0 text-xs font-mono font-medium text-muted-foreground">{question.marks} marks</span>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold text-primary-foreground", bloomColors[question.bloomLevel])}>
-          {question.bloomLevel}
-        </span>
-        <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold text-primary-foreground", difficultyColors[question.difficulty])}>
-          {question.difficulty}
-        </span>
-        {question.keywords.map((kw) => (
-          <span key={kw} className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {kw}
-          </span>
-        ))}
-      </div>
-
       <div className="grid grid-cols-2 gap-3">
-        <ComplexityBars value={question.complexity} />
+        <DifficultyBars difficulty={question.difficulty} />
         <ScoreBar label="Similarity" value={question.similarityScore} variant={similarityVariant} />
       </div>
 

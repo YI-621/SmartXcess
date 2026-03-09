@@ -9,8 +9,9 @@ import { useAssessmentsWithQuestions, useModerationComments, useSaveComment, use
 import { useToast } from "@/hooks/use-toast";
 
 const statusStyles: Record<string, string> = {
+  Moderating: "bg-primary/10 text-primary border-primary/20",
   Pending: "bg-warning/10 text-warning border-warning/20",
-  Reviewed: "bg-info/10 text-info border-info/20",
+  Done: "bg-info/10 text-info border-info/20",
   Approved: "bg-success/10 text-success border-success/20",
   Rejected: "bg-destructive/10 text-destructive border-destructive/20",
 };
@@ -25,7 +26,7 @@ const HistoryPage = () => {
   const assessments = dbAssessments ?? [];
 
   const history = assessments.filter(
-    (a) => a.status === "Approved" || a.status === "Rejected" || a.status === "Reviewed"
+    (a) => a.status === "Approved" || a.status === "Rejected" || a.status === "Done"
   );
   const inProgress = assessments.filter((a) => a.status === "Pending");
 
@@ -49,19 +50,20 @@ const HistoryPage = () => {
     }
   }, [dbComments]);
 
-  const handleDone = () => {
+  const handleDone = async () => {
     if (selectedId && selected && !selected.isDone) {
-      updateStatus.mutate({ id: selectedId, status: "Reviewed" });
-      logActivity.mutate({ type: "moderation_complete", description: `${selected.title} moderation completed`, assessmentId: selectedId });
-      toast({ title: "Assessment marked as reviewed" });
-      setSelectedId(null);
-    }
-  };
+      const publishTargets = selected.questions
+        .map((q) => ({ questionId: q.id, comment: comments[q.id] }))
+        .filter((item) => item.comment !== undefined);
 
-  const handleCommentBlur = (questionId: string) => {
-    const comment = comments[questionId];
-    if (comment !== undefined) {
-      saveComment.mutate({ questionId, comment });
+      if (publishTargets.length > 0) {
+        await Promise.all(publishTargets.map((item) => saveComment.mutateAsync(item)));
+      }
+
+      updateStatus.mutate({ id: selectedId, status: "Done" });
+      logActivity.mutate({ type: "moderation_complete", description: `${selected.title} moderation completed`, assessmentId: selectedId });
+      toast({ title: "Assessment marked as done" });
+      setSelectedId(null);
     }
   };
 
@@ -80,7 +82,7 @@ const HistoryPage = () => {
             <div>
               <h2 className="text-xl font-bold text-foreground">{selected.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                {selected.course} · {selected.lecturer} · {selected.date}
+                Module: {selected.course} · Uploaded by: {selected.lecturer} · {selected.date}
               </p>
             </div>
           </div>
@@ -106,7 +108,6 @@ const HistoryPage = () => {
                 onCommentChange={(val) =>
                   !selected.isDone && setComments((prev) => ({ ...prev, [q.id]: val }))
                 }
-                onCommentBlur={() => handleCommentBlur(q.id)}
                 readOnly={selected.isDone}
               />
             ))}
@@ -137,7 +138,7 @@ const HistoryPage = () => {
             >
               <div>
                 <p className="text-sm font-medium text-card-foreground">{a.title}</p>
-                <p className="text-xs text-muted-foreground mt-1">{a.lecturer} · {a.course} · {a.date}</p>
+                <p className="text-xs text-muted-foreground mt-1">Uploaded by: {a.lecturer} · Module: {a.course} · {a.date}</p>
               </div>
               <div className="flex items-center gap-3">
                 <Pencil className="h-3.5 w-3.5 text-warning" />
@@ -160,7 +161,7 @@ const HistoryPage = () => {
           >
             <div>
               <p className="text-sm font-medium text-card-foreground">{a.title}</p>
-              <p className="text-xs text-muted-foreground mt-1">{a.lecturer} · {a.course} · {a.date}</p>
+              <p className="text-xs text-muted-foreground mt-1">Uploaded by: {a.lecturer} · Module: {a.course} · {a.date}</p>
             </div>
             <div className="flex items-center gap-4">
               <span className={cn("text-sm font-bold font-mono", a.overallScore >= 70 ? "text-success" : a.overallScore >= 50 ? "text-warning" : "text-destructive")}>

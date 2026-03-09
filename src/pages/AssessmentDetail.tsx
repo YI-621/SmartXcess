@@ -10,8 +10,9 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 const statusStyles: Record<string, string> = {
+  Moderating: "bg-primary/10 text-primary border-primary/20",
   Pending: "bg-warning/10 text-warning border-warning/20",
-  Reviewed: "bg-info/10 text-info border-info/20",
+  Done: "bg-info/10 text-info border-info/20",
   Approved: "bg-success/10 text-success border-success/20",
   Rejected: "bg-destructive/10 text-destructive border-destructive/20",
 };
@@ -154,12 +155,6 @@ const AssessmentDetail = () => {
         </div>
         <div className="space-y-4">
           <AssessmentSummary assessment={assessment} />
-          {assessment.flagged && assessment.flagReason && (
-            <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4">
-              <p className="text-xs font-semibold text-destructive mb-1">⚠ Flagged</p>
-              <p className="text-sm text-destructive/80">{assessment.flagReason}</p>
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -7,34 +7,39 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { useAssessmentsWithQuestions, useLogActivity } from "@/hooks/useData";
+import { useAssessmentsWithQuestions } from "@/hooks/useData";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Assessment } from "@/lib/assessment";
 
 const statusStyles: Record<string, string> = {
+  Moderating: "bg-primary/10 text-primary border-primary/20",
   Pending: "bg-warning/10 text-warning border-warning/20",
-  Reviewed: "bg-info/10 text-info border-info/20",
+  Done: "bg-info/10 text-info border-info/20",
   Approved: "bg-success/10 text-success border-success/20",
   Rejected: "bg-destructive/10 text-destructive border-destructive/20",
 };
+
+type UploadPreviewAssessment = Assessment & { isTemporary?: boolean };
 
 const Assessments = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const { user } = useAuth();
   const { toast } = useToast();
-  const logActivity = useLogActivity();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [moduleCode, setModuleCode] = useState("");
+  const [pdfName, setPdfName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<UploadPreviewAssessment[]>([]);
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
 
   const { data: dbAssessments, isLoading } = useAssessmentsWithQuestions();
-  const assessments = dbAssessments ?? [];
+  const assessments: UploadPreviewAssessment[] = [...pendingUploads, ...(dbAssessments ?? [])];
 
   const filtered = assessments.filter(
     (a) =>
@@ -53,62 +58,65 @@ const Assessments = () => {
   const handleUploadSubmit = async () => {
     if (!selectedFile || !user || !moduleCode.trim()) return;
 
+    const tempId = `temp-upload-${Date.now()}`;
+    const previewTitle = pdfName.trim() || selectedFile.name;
+    const previewDate = new Date().toLocaleDateString();
+
+    setPendingUploads((prev) => [
+      {
+        id: tempId,
+        title: previewTitle,
+        course: moduleCode.trim().toUpperCase(),
+        lecturer: "",
+        date: previewDate,
+        status: "Moderating",
+        questions: [],
+        overallScore: -1,
+        flagged: false,
+        isTemporary: true,
+      },
+      ...prev,
+    ]);
+
     setUploading(true);
     try {
-      // 1. Upload file to storage
-      const fileName = `${user.id}/${Date.now()}_${selectedFile.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("assessments")
-        .upload(fileName, selectedFile);
-      if (uploadError) throw uploadError;
+      const formData = new FormData();
+      formData.append("module_code", moduleCode.trim().toUpperCase());
+      formData.append("uploaded_by", user.id);
+      if (pdfName.trim()) {
+        formData.append("pdf_name", pdfName.trim());
+      }
+      formData.append("file", selectedFile);
 
-      // 2. Find a moderator assigned to this module code
-      const { data: moderatorMapping } = await supabase
-        .from("moderator_modules")
-        .select("user_id")
-        .eq("module_code", moduleCode.trim().toUpperCase())
-        .limit(1)
-        .maybeSingle();
-
-      // 3. Create assessment record
-      const { data: newAssessment, error } = await supabase
-        .from("assessments")
-        .insert({
-          title: selectedFile.name.replace(/\.[^/.]+$/, ""),
-          course: moduleCode.trim().toUpperCase(),
-          module_code: moduleCode.trim().toUpperCase(),
-          lecturer_id: user.id,
-          moderator_id: moderatorMapping?.user_id ?? null,
-          file_url: fileName,
-          status: "Pending",
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      toast({
-        title: "Assessment uploaded",
-        description: "Your assessment has been submitted for moderation.",
+      const response = await fetch(`${apiBaseUrl}/api/moderation/analyze`, {
+        method: "POST",
+        body: formData,
       });
 
-      logActivity.mutate({
-        type: "upload",
-        description: `${newAssessment.title} uploaded for ${moduleCode.toUpperCase()}`,
-        assessmentId: newAssessment.id,
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.detail ?? payload?.reason ?? "Analysis failed");
+      }
+
+      toast({
+        title: "Assessment processed",
+        description: `Analysis completed for ${selectedFile.name}.`,
       });
 
       queryClient.invalidateQueries({ queryKey: ["assessments"] });
       queryClient.invalidateQueries({ queryKey: ["assessments-full"] });
+      queryClient.invalidateQueries({ queryKey: ["assessment"] });
 
       setUploadDialogOpen(false);
       setModuleCode("");
+      setPdfName("");
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     } finally {
       setUploading(false);
+      setPendingUploads((prev) => prev.filter((assessment) => assessment.id !== tempId));
     }
   };
 
@@ -144,13 +152,23 @@ const Assessments = () => {
               <p className="text-[10px] text-muted-foreground">The moderator assigned to this module will review your assessment.</p>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="pdfName">PDF Name</Label>
+              <Input
+                id="pdfName"
+                placeholder="e.g. Final Exam BUS201"
+                value={pdfName}
+                onChange={(e) => setPdfName(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground">Optional. This name will be used for the saved assessment title.</p>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="assessmentFile">Assessment File</Label>
               <Input
                 id="assessmentFile"
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileSelect}
-                accept=".pdf,.doc,.docx,.xlsx,.csv,.txt"
+                accept=".pdf"
               />
             </div>
             {selectedFile && (
@@ -200,17 +218,26 @@ const Assessments = () => {
               {filtered.map((a) => (
                 <tr
                   key={a.id}
-                  className="hover:bg-muted/30 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/assessment-detail?id=${a.id}`)}
+                  className={cn(
+                    "transition-colors",
+                    a.isTemporary ? "opacity-80" : "hover:bg-muted/30 cursor-pointer"
+                  )}
+                  onClick={() => {
+                    if (!a.isTemporary) navigate(`/assessment-detail?id=${a.id}`);
+                  }}
                 >
                   <td className="px-5 py-3.5 text-sm font-medium text-card-foreground">{a.title}</td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.course}</td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.date}</td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.questions.length}</td>
                   <td className="px-5 py-3.5">
-                    <span className={cn("text-sm font-bold font-mono", a.overallScore >= 70 ? "text-success" : a.overallScore >= 50 ? "text-warning" : "text-destructive")}>
-                      {a.overallScore}%
-                    </span>
+                    {a.overallScore < 0 ? (
+                      <span className="text-sm font-bold font-mono text-muted-foreground">--</span>
+                    ) : (
+                      <span className={cn("text-sm font-bold font-mono", a.overallScore >= 70 ? "text-success" : a.overallScore >= 50 ? "text-warning" : "text-destructive")}>
+                        {a.overallScore}%
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5">
                     <Badge variant="outline" className={cn("text-[10px] font-medium border", statusStyles[a.status])}>

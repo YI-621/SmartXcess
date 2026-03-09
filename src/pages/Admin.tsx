@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Shield, Users, Settings, Save, Loader2, Plus, X, BookOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAssessmentsWithQuestions } from "@/hooks/useData";
+import { useNavigate } from "react-router-dom";
 
 type UserWithRole = {
   user_id: string;
@@ -27,6 +29,7 @@ type ModeratorModule = {
 };
 
 export default function Admin() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [similarityThreshold, setSimilarityThreshold] = useState(75);
@@ -36,12 +39,23 @@ export default function Admin() {
   const [newModuleCode, setNewModuleCode] = useState("");
   const [selectedModeratorId, setSelectedModeratorId] = useState("");
   const { toast } = useToast();
+  const { data: assessments = [], isLoading: loadingAssessments } = useAssessmentsWithQuestions();
+  const flaggedAssessments = assessments.filter((assessment) => assessment.flagged);
 
   useEffect(() => {
     fetchUsers();
     fetchSettings();
     fetchModeratorModules();
   }, []);
+
+  const toNumericSetting = (value: unknown, fallback: number) => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
+  };
 
   const fetchUsers = async () => {
     const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, department");
@@ -60,12 +74,17 @@ export default function Admin() {
   };
 
   const fetchSettings = async () => {
-    const { data } = await supabase.from("system_settings").select("key, value");
+    const { data, error } = await supabase.from("system_settings").select("key, value");
+    if (error) {
+      toast({ title: "Unable to load settings", description: error.message, variant: "destructive" });
+      return;
+    }
+
     if (data) {
       const sim = data.find((s) => s.key === "similarity_threshold");
       const comp = data.find((s) => s.key === "complexity_threshold");
-      if (sim) setSimilarityThreshold(Number(JSON.parse(JSON.stringify(sim.value))));
-      if (comp) setComplexityThreshold(Number(JSON.parse(JSON.stringify(comp.value))));
+      if (sim) setSimilarityThreshold(toNumericSetting(sim.value, 75));
+      if (comp) setComplexityThreshold(toNumericSetting(comp.value, 60));
     }
   };
 
@@ -107,11 +126,23 @@ export default function Admin() {
 
   const saveSettings = async () => {
     setSavingSettings(true);
-    await Promise.all([
-      supabase.from("system_settings").update({ value: JSON.stringify(similarityThreshold) as any }).eq("key", "similarity_threshold"),
-      supabase.from("system_settings").update({ value: JSON.stringify(complexityThreshold) as any }).eq("key", "complexity_threshold"),
-    ]);
+    const payload = [
+      { key: "similarity_threshold", value: similarityThreshold },
+      { key: "complexity_threshold", value: complexityThreshold },
+    ];
+
+    const { error } = await supabase
+      .from("system_settings")
+      .upsert(payload as any, { onConflict: "key" });
+
+    if (error) {
+      toast({ title: "Failed to save settings", description: error.message, variant: "destructive" });
+      setSavingSettings(false);
+      return;
+    }
+
     toast({ title: "Settings saved" });
+    fetchSettings();
     setSavingSettings(false);
   };
 
@@ -160,6 +191,7 @@ export default function Admin() {
         <TabsList>
           <TabsTrigger value="users" className="gap-2"><Users className="h-4 w-4" /> Users</TabsTrigger>
           <TabsTrigger value="modules" className="gap-2"><BookOpen className="h-4 w-4" /> Module Assignments</TabsTrigger>
+          <TabsTrigger value="flagged" className="gap-2"><Shield className="h-4 w-4" /> Flagged</TabsTrigger>
           <TabsTrigger value="settings" className="gap-2"><Settings className="h-4 w-4" /> Settings</TabsTrigger>
         </TabsList>
 
@@ -277,6 +309,51 @@ export default function Admin() {
                 </Table>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-6">No module assignments yet. Add one above.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="flagged" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Flagged Assessments</CardTitle>
+              <CardDescription>Assessments with major moderation issues are listed here for admin review.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingAssessments ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+              ) : flaggedAssessments.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">No flagged assessments found.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Assessment</TableHead>
+                      <TableHead>Module</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Score</TableHead>
+                      <TableHead>Issue</TableHead>
+                      <TableHead className="w-28"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {flaggedAssessments.map((assessment) => (
+                      <TableRow key={assessment.id}>
+                        <TableCell className="font-medium">{assessment.title}</TableCell>
+                        <TableCell><Badge variant="outline" className="font-mono">{assessment.course}</Badge></TableCell>
+                        <TableCell>{assessment.date}</TableCell>
+                        <TableCell className="font-mono">{assessment.overallScore}%</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{assessment.flagReason ?? "Major moderation issue detected"}</TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/assessment-detail?id=${assessment.id}`)}>
+                            View
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               )}
             </CardContent>
           </Card>

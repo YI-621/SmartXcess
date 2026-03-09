@@ -20,6 +20,13 @@ export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
         <span className={cn("text-2xl font-bold font-mono", scoreColor)}>{assessment.overallScore}%</span>
       </div>
 
+      {assessment.flagged && (
+        <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2">
+          <p className="text-xs font-semibold text-destructive">Flagged Assessment</p>
+          {assessment.flagReason && <p className="text-[11px] text-destructive/90 mt-0.5">{assessment.flagReason}</p>}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 text-center">
         {[
           { label: "Questions", value: assessment.questions.length },

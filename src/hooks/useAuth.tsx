@@ -17,6 +17,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const ACTIVE_ROLE_STORAGE_KEY = "smartxcess.activeRole";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -34,13 +35,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (rolesRes.data) {
       const userRoles = rolesRes.data.map((r) => r.role as AppRole);
       setRoles(userRoles);
-      // Set initial active role: admin > moderator > lecturer
-      if (!activeRole || !userRoles.includes(activeRole)) {
-        if (userRoles.includes("admin")) setActiveRole("admin");
-        else if (userRoles.includes("moderator")) setActiveRole("moderator");
-        else if (userRoles.includes("lecturer")) setActiveRole("lecturer");
-        else setActiveRole(userRoles[0] ?? null);
-      }
+      setActiveRole((prev) => {
+        const savedRole = localStorage.getItem(ACTIVE_ROLE_STORAGE_KEY) as AppRole | null;
+        if (prev && userRoles.includes(prev)) return prev;
+        if (savedRole && userRoles.includes(savedRole)) return savedRole;
+
+        // Default priority for multi-role users: admin > lecturer > moderator
+        if (userRoles.includes("admin")) return "admin";
+        if (userRoles.includes("lecturer")) return "lecturer";
+        if (userRoles.includes("moderator")) return "moderator";
+        return userRoles[0] ?? null;
+      });
     }
     if (profileRes.data) setProfile(profileRes.data);
   };
@@ -48,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const switchRole = (role: AppRole) => {
     if (roles.includes(role)) {
       setActiveRole(role);
+      localStorage.setItem(ACTIVE_ROLE_STORAGE_KEY, role);
     }
   };
 
@@ -61,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoles([]);
         setProfile(null);
         setActiveRole(null);
+        localStorage.removeItem(ACTIVE_ROLE_STORAGE_KEY);
       }
       setLoading(false);
     });

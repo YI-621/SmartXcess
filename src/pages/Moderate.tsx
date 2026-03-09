@@ -11,8 +11,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 const statusStyles: Record<string, string> = {
+  Moderating: "bg-primary/10 text-primary border-primary/20",
   Pending: "bg-warning/10 text-warning border-warning/20",
-  Reviewed: "bg-info/10 text-info border-info/20",
+  Done: "bg-info/10 text-info border-info/20",
   Approved: "bg-success/10 text-success border-success/20",
   Rejected: "bg-destructive/10 text-destructive border-destructive/20",
 };
@@ -26,7 +27,7 @@ const Moderate = () => {
 
   // If no ID selected, show list of assigned assessments
   const { data: allAssessments, isLoading: listLoading } = useAssessmentsWithQuestions();
-  const assignedAssessments = allAssessments?.filter((a) => a.status === "Pending" || a.status === "Reviewed") ?? [];
+  const assignedAssessments = allAssessments?.filter((a) => a.status === "Pending") ?? [];
 
   // Single assessment view
   const { data: dbAssessment, isLoading } = useAssessmentWithQuestions(id);
@@ -52,18 +53,19 @@ const Moderate = () => {
     setComments((prev) => ({ ...prev, [questionId]: value }));
   };
 
-  const handleCommentBlur = (questionId: string) => {
-    const comment = comments[questionId];
-    if (comment !== undefined) {
-      saveComment.mutate({ questionId, comment });
-    }
-  };
-
-  const handleDone = () => {
+  const handleDone = async () => {
     if (id && dbAssessment) {
-      updateStatus.mutate({ id, status: "Reviewed" });
+      const publishTargets = dbAssessment.questions
+        .map((q) => ({ questionId: q.id, comment: comments[q.id] }))
+        .filter((item) => item.comment !== undefined);
+
+      if (publishTargets.length > 0) {
+        await Promise.all(publishTargets.map((item) => saveComment.mutateAsync(item)));
+      }
+
+      updateStatus.mutate({ id, status: "Done" });
       logActivity.mutate({ type: "moderation_complete", description: `${assessment!.title} moderation completed`, assessmentId: id });
-      toast({ title: "Assessment marked as reviewed", description: "The lecturer can now see your comments." });
+      toast({ title: "Assessment marked as done", description: "The lecturer can now see your comments." });
       setSearchParams({});
     }
   };
@@ -94,7 +96,7 @@ const Moderate = () => {
               >
                 <div>
                   <p className="text-sm font-medium text-card-foreground">{a.title}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{a.course} · {a.lecturer} · {a.date}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Module: {a.course} · Uploaded by: {a.lecturer} · {a.date}</p>
                   <p className="text-xs text-muted-foreground">{a.questions.length} questions · Score: {a.overallScore}%</p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -119,7 +121,7 @@ const Moderate = () => {
     return <div className="text-center py-20 text-muted-foreground">Assessment not found.</div>;
   }
 
-  const isReviewed = assessment.status === "Reviewed";
+  const isReviewed = assessment.status === "Done";
 
   return (
     <div className="space-y-6">
@@ -136,7 +138,7 @@ const Moderate = () => {
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              {assessment.course} · {assessment.lecturer} · {assessment.date}
+              Module: {assessment.course} · Uploaded by: {assessment.lecturer} · {assessment.date}
             </p>
           </div>
         </div>
@@ -161,7 +163,6 @@ const Moderate = () => {
               index={i}
               comment={comments[q.id] || ""}
               onCommentChange={(val) => handleCommentChange(q.id, val)}
-              onCommentBlur={() => handleCommentBlur(q.id)}
               readOnly={isReviewed}
             />
           ))}

@@ -72,15 +72,33 @@ export interface DbUserModule {
 
 type DbQuestionAnalysisRow = Tables<"question_analysis_results">;
 
+interface ModerationThresholds {
+  similarityThreshold: number;
+  complexityThreshold: number;
+}
+
+type AssessmentStatusMap = Record<string, string>;
+
 function toPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function parseComplexity(value: string | null): number {
-  if (!value) return 0;
+const complexityFallbackByDifficulty: Record<Question["difficulty"], number> = {
+  "Very Easy": 10,
+  Easy: 30,
+  Medium: 50,
+  Hard: 70,
+  "Very Hard": 90,
+};
+
+function parseComplexity(value: string | null): number | null {
+  if (!value) return null;
   const numeric = Number.parseFloat(String(value).replace(/[^0-9.-]/g, ""));
-  return toPercent(Number.isFinite(numeric) ? numeric : 0);
+  if (Number.isFinite(numeric)) return toPercent(numeric);
+
+  const normalized = normalizeDifficulty(value);
+  return complexityFallbackByDifficulty[normalized];
 }
 
 function inferDifficulty(complexity: number): Question["difficulty"] {
@@ -99,8 +117,63 @@ function splitKeywords(raw: string | null): string[] {
     .filter(Boolean);
 }
 
+function parseSettingNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+async function fetchModerationThresholds(): Promise<ModerationThresholds> {
+  const defaults: ModerationThresholds = {
+    similarityThreshold: 75,
+    complexityThreshold: 60,
+  };
+
+  const { data, error } = await supabase
+    .from("system_settings")
+    .select("key, value")
+    .in("key", ["similarity_threshold", "complexity_threshold"]);
+
+  if (error || !data) return defaults;
+
+  const similarity = data.find((item) => item.key === "similarity_threshold")?.value;
+  const complexity = data.find((item) => item.key === "complexity_threshold")?.value;
+
+  return {
+    similarityThreshold: parseSettingNumber(similarity, defaults.similarityThreshold),
+    complexityThreshold: parseSettingNumber(complexity, defaults.complexityThreshold),
+  };
+}
+
+async function fetchAssessmentStatusMap(): Promise<AssessmentStatusMap> {
+  const { data, error } = await supabase
+    .from("system_settings")
+    .select("value")
+    .eq("key", "assessment_status_map")
+    .maybeSingle();
+
+  if (error || !data?.value || typeof data.value !== "object" || Array.isArray(data.value)) {
+    return {};
+  }
+
+  const map: AssessmentStatusMap = {};
+  for (const [assessmentId, status] of Object.entries(data.value as Record<string, unknown>)) {
+    if (typeof status === "string" && assessmentId) {
+      map[assessmentId] = status;
+    }
+  }
+
+  return map;
+}
+
 function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Question {
-  const complexity = parseComplexity(row.complexity);
+  const dbDifficulty = (row as { difficulty?: string | null }).difficulty ?? null;
+  const normalizedDifficulty = normalizeDifficulty(dbDifficulty ?? row.complexity);
+  const parsedComplexity = parseComplexity(row.complexity);
+  const complexity = parsedComplexity ?? complexityFallbackByDifficulty[normalizedDifficulty];
   const similarity = toPercent(row.similarity_score ?? row.overall_similarity ?? 0);
 
   return {
@@ -108,7 +181,7 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
     text: row.question_text ?? "",
     marks: 0,
     bloomLevel: normalizeBloomLevel(row.final_bloom_level),
-    difficulty: normalizeDifficulty(inferDifficulty(complexity)),
+    difficulty: normalizedDifficulty,
     complexity,
     similarityScore: similarity,
     similarTo: row.similarity_source ?? undefined,
@@ -125,10 +198,14 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
 }
 
 async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
-  const { data: rows, error } = await supabase
-    .from("question_analysis_results")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const [{ data: rows, error }, thresholds, statusMap] = await Promise.all([
+    supabase
+      .from("question_analysis_results")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    fetchModerationThresholds(),
+    fetchAssessmentStatusMap(),
+  ]);
 
   if (error) throw error;
   if (!rows || rows.length === 0) return [];
@@ -153,11 +230,28 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
   for (const [key, groupRows] of grouped.entries()) {
     const first = groupRows[0];
     const questions = groupRows.map(mapAnalysisRowToQuestion);
+    const avgComplexity = questions.length
+      ? Math.round(questions.reduce((sum, q) => sum + q.complexity, 0) / questions.length)
+      : 0;
     const avgSimilarity = questions.length
       ? Math.round(questions.reduce((sum, q) => sum + q.similarityScore, 0) / questions.length)
       : 0;
     const overallScore = toPercent(100 - avgSimilarity);
-    const flagged = questions.some((q) => q.similarityScore >= 70);
+
+    const highSimilarityQuestions = questions.filter((q) => q.similarityScore >= thresholds.similarityThreshold).length;
+    const hasHighSimilarity = highSimilarityQuestions > 0;
+    const lowComplexityAssessment = avgComplexity < thresholds.complexityThreshold;
+    const flagged = hasHighSimilarity || lowComplexityAssessment;
+
+    const reasons: string[] = [];
+    if (hasHighSimilarity) {
+      reasons.push(
+        `${highSimilarityQuestions} question(s) exceed similarity threshold (${thresholds.similarityThreshold}%)`
+      );
+    }
+    if (lowComplexityAssessment) {
+      reasons.push(`Average complexity below threshold (${avgComplexity}% < ${thresholds.complexityThreshold}%)`);
+    }
 
     assessments.push({
       id: key,
@@ -166,15 +260,23 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
       lecturer: first.uploaded_by ? profileMap.get(first.uploaded_by) ?? "Unknown" : "Unknown",
       moderator: undefined,
       date: first.created_at ? new Date(first.created_at).toLocaleDateString() : "N/A",
-      status: normalizeAssessmentStatus("Reviewed"),
+      status: normalizeAssessmentStatus(statusMap[key] ?? "Pending"),
       questions,
       overallScore,
       flagged,
-      flagReason: flagged ? "High similarity detected in one or more questions" : undefined,
+      flagReason: reasons.length ? reasons.join("; ") : undefined,
     });
   }
 
   return assessments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
+function filterAssessmentsByRole(assessments: Assessment[], userId: string | null | undefined, activeRole: string | null | undefined): Assessment[] {
+  if (activeRole !== "lecturer") return assessments;
+  if (!userId) return [];
+
+  // Group key format includes uploader ID: filename::module::uploaded_by::date.
+  return assessments.filter((assessment) => assessment.id.split("::")[2] === userId);
 }
 
 // Convert DB assessment + questions to the frontend Assessment shape
@@ -210,10 +312,16 @@ export function toFrontendAssessment(a: DbAssessment, questions: DbQuestion[], l
 // ---- Hooks ----
 
 export function useAssessments() {
+  const { user, activeRole } = useAuth();
+
   return useQuery({
-    queryKey: ["assessments"],
+    queryKey: ["assessments", activeRole, user?.id],
     queryFn: async () => {
-      const assessments = await fetchModerationAssessmentsFromAnalysis();
+      const assessments = filterAssessmentsByRole(
+        await fetchModerationAssessmentsFromAnalysis(),
+        user?.id,
+        activeRole
+      );
       return assessments.map((a) => ({
         id: a.id,
         title: a.title,
@@ -234,31 +342,49 @@ export function useAssessments() {
 }
 
 export function useAssessmentWithQuestions(id: string | null) {
+  const { user, activeRole } = useAuth();
+
   return useQuery({
-    queryKey: ["assessment", id],
+    queryKey: ["assessment", id, activeRole, user?.id],
     enabled: !!id,
     queryFn: async () => {
-      const assessments = await fetchModerationAssessmentsFromAnalysis();
+      const assessments = filterAssessmentsByRole(
+        await fetchModerationAssessmentsFromAnalysis(),
+        user?.id,
+        activeRole
+      );
       return assessments.find((a) => a.id === id!) ?? null;
     },
   });
 }
 
 export function useAssessmentsWithQuestions() {
+  const { user, activeRole } = useAuth();
+
   return useQuery({
-    queryKey: ["assessments-full"],
+    queryKey: ["assessments-full", activeRole, user?.id],
     queryFn: async () => {
-      return fetchModerationAssessmentsFromAnalysis();
+      return filterAssessmentsByRole(
+        await fetchModerationAssessmentsFromAnalysis(),
+        user?.id,
+        activeRole
+      );
     },
   });
 }
 
 export function useQuestions(assessmentId: string | null) {
+  const { user, activeRole } = useAuth();
+
   return useQuery({
-    queryKey: ["questions", assessmentId],
+    queryKey: ["questions", assessmentId, activeRole, user?.id],
     enabled: !!assessmentId,
     queryFn: async () => {
-      const assessments = await fetchModerationAssessmentsFromAnalysis();
+      const assessments = filterAssessmentsByRole(
+        await fetchModerationAssessmentsFromAnalysis(),
+        user?.id,
+        activeRole
+      );
       const assessment = assessments.find((a) => a.id === assessmentId!);
       return (assessment?.questions ?? []).map((q, index) => ({
         id: q.id,
@@ -333,6 +459,30 @@ export function useUpdateAssessmentStatus() {
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
       if (!id || !status) return;
+
+      const { data, error } = await supabase
+        .from("system_settings")
+        .select("value")
+        .eq("key", "assessment_status_map")
+        .maybeSingle();
+
+      if (error) throw error;
+
+      const existingMap: AssessmentStatusMap =
+        data?.value && typeof data.value === "object" && !Array.isArray(data.value)
+          ? (data.value as AssessmentStatusMap)
+          : {};
+
+      const nextMap: AssessmentStatusMap = {
+        ...existingMap,
+        [id]: status,
+      };
+
+      const { error: saveError } = await supabase
+        .from("system_settings")
+        .upsert({ key: "assessment_status_map", value: nextMap } as any, { onConflict: "key" });
+
+      if (saveError) throw saveError;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assessments"] });

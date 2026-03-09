@@ -1,6 +1,6 @@
 export type BloomLevel = "Knowledge" | "Comprehension" | "Application" | "Analysis" | "Synthesis" | "Evaluation";
 export type Difficulty = "Very Easy" | "Easy" | "Medium" | "Hard" | "Very Hard";
-export type AssessmentStatus = "Pending" | "Reviewed" | "Approved" | "Rejected";
+export type AssessmentStatus = "Moderating" | "Pending" | "Done" | "Approved" | "Rejected";
 
 const bloomLevelAliases: Record<string, BloomLevel> = {
   knowledge: "Knowledge",
@@ -32,8 +32,10 @@ const difficultyAliases: Record<string, Difficulty> = {
 };
 
 const statusAliases: Record<string, AssessmentStatus> = {
+  moderating: "Moderating",
   pending: "Pending",
-  reviewed: "Reviewed",
+  reviewed: "Done",
+  done: "Done",
   approved: "Approved",
   rejected: "Rejected",
 };
@@ -100,7 +102,21 @@ export function normalizeBloomLevel(value: string | null | undefined): BloomLeve
 }
 
 export function normalizeDifficulty(value: string | null | undefined): Difficulty {
-  return difficultyAliases[normalizeKey(value)] ?? "Medium";
+  const normalized = normalizeKey(value);
+  if (!normalized) return "Medium";
+
+  const direct = difficultyAliases[normalized];
+  if (direct) return direct;
+
+  // Handle values like "Difficulty: Very Hard", "very-hard", or "level=easy".
+  const collapsed = normalized.replace(/[-_]+/g, " ");
+  if (collapsed.includes("very hard")) return "Very Hard";
+  if (collapsed.includes("very easy")) return "Very Easy";
+  if (collapsed.includes("hard")) return "Hard";
+  if (collapsed.includes("easy")) return "Easy";
+  if (collapsed.includes("medium")) return "Medium";
+
+  return "Medium";
 }
 
 export function normalizeAssessmentStatus(value: string | null | undefined): AssessmentStatus {

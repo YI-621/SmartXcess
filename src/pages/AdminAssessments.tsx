@@ -13,8 +13,9 @@ import {
 } from "@/components/ui/select";
 
 const statusStyles: Record<string, string> = {
+  Moderating: "bg-primary/10 text-primary border-primary/20",
   Pending: "bg-warning/10 text-warning border-warning/20",
-  Reviewed: "bg-info/10 text-info border-info/20",
+  Done: "bg-info/10 text-info border-info/20",
   Approved: "bg-success/10 text-success border-success/20",
   Rejected: "bg-destructive/10 text-destructive border-destructive/20",
 };
