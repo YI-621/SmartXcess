@@ -35,8 +35,9 @@ const Assessments = () => {
   const [moduleCode, setModuleCode] = useState("");
   const [pdfName, setPdfName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedModeratingAssessment, setSelectedModeratingAssessment] = useState<UploadPreviewAssessment | null>(null);
   const [pendingUploads, setPendingUploads] = useState<UploadPreviewAssessment[]>([]);
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.DEV ? "http://localhost:8000" : "");
 
   const { data: dbAssessments, isLoading } = useAssessmentsWithQuestions();
   const assessments: UploadPreviewAssessment[] = [...pendingUploads, ...(dbAssessments ?? [])];
@@ -57,6 +58,14 @@ const Assessments = () => {
 
   const handleUploadSubmit = async () => {
     if (!selectedFile || !user || !moduleCode.trim()) return;
+    if (!apiBaseUrl) {
+      toast({
+        title: "Backend URL not configured",
+        description: "Set VITE_API_BASE_URL for production deployment.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const tempId = `temp-upload-${Date.now()}`;
     const previewTitle = pdfName.trim() || selectedFile.name;
@@ -189,6 +198,31 @@ const Assessments = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={!!selectedModeratingAssessment}
+        onOpenChange={(open) => {
+          if (!open) setSelectedModeratingAssessment(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Moderation In Progress</DialogTitle>
+            <DialogDescription>
+              This assessment is currently being moderated by the system.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-border bg-muted/30 p-5 text-center space-y-3">
+            <Loader2 className="h-7 w-7 animate-spin text-primary mx-auto" />
+            <p className="text-sm font-medium text-card-foreground">
+              {selectedModeratingAssessment?.title ?? "Assessment"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Please wait while SmartXcess analyzes and prepares the moderation outcome.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
@@ -216,14 +250,24 @@ const Assessments = () => {
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map((a) => (
+                (() => {
+                  const canOpen = a.status === "Moderating" || !a.isTemporary;
+                  return (
                 <tr
                   key={a.id}
                   className={cn(
                     "transition-colors",
-                    a.isTemporary ? "opacity-80" : "hover:bg-muted/30 cursor-pointer"
+                    canOpen ? "hover:bg-muted/30 cursor-pointer" : "opacity-80"
                   )}
                   onClick={() => {
-                    if (!a.isTemporary) navigate(`/assessment-detail?id=${a.id}`);
+                    if (a.status === "Moderating") {
+                      setSelectedModeratingAssessment(a);
+                      return;
+                    }
+
+                    if (!a.isTemporary) {
+                      navigate(`/assessment-detail?id=${a.id}`);
+                    }
                   }}
                 >
                   <td className="px-5 py-3.5 text-sm font-medium text-card-foreground">{a.title}</td>
@@ -245,6 +289,8 @@ const Assessments = () => {
                     </Badge>
                   </td>
                 </tr>
+                  );
+                })()
               ))}
             </tbody>
           </table>

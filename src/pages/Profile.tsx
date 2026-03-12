@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,27 +7,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Save, Loader2, User, Plus, X, ArrowRightLeft } from "lucide-react";
+import { Save, Loader2, User, Plus, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useNavigate } from "react-router-dom";
 import { useUserModules, useAddModule, useRemoveModule } from "@/hooks/useData";
 
 export default function Profile() {
-  const { user, profile, roles, activeRole, switchRole } = useAuth();
+  const { user, profile, roles, activeRole } = useAuth();
   const { toast } = useToast();
-  const navigate = useNavigate();
   const [fullName, setFullName] = useState(profile?.full_name ?? "");
   const [department, setDepartment] = useState(profile?.department ?? "");
   const [saving, setSaving] = useState(false);
   const [newModule, setNewModule] = useState("");
 
+  useEffect(() => {
+    setFullName(profile?.full_name ?? "");
+    setDepartment(profile?.department ?? "");
+  }, [profile?.full_name, profile?.department]);
+
   const { data: modules, isLoading: modulesLoading } = useUserModules();
   const addModuleMutation = useAddModule();
   const removeModuleMutation = useRemoveModule();
-
-  const switchableRoles = roles.filter((r) => r === "lecturer" || r === "moderator");
-  const canSwitch = switchableRoles.length > 1;
 
   const initials = fullName
     ? fullName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
@@ -57,13 +56,6 @@ export default function Profile() {
         onError: (err: any) => toast({ title: "Failed to add module", description: err.message, variant: "destructive" }),
       });
     }
-  };
-
-  const handleRoleSwitch = (role: string) => {
-    switchRole(role as any);
-    toast({ title: `Switched to ${role} view` });
-    if (role === "moderator") navigate("/moderate");
-    else if (role === "lecturer") navigate("/dashboard");
   };
 
   const roleBadgeVariant = (role: string) => {
@@ -114,7 +106,7 @@ export default function Profile() {
           </div>
           <div className="space-y-2">
             <Label>Email</Label>
-            <Input value={user?.email ?? ""} disabled className="bg-muted" />
+            <Input value={profile?.email ?? user?.email ?? ""} disabled className="bg-muted" />
           </div>
           <div className="space-y-2">
             <Label>Current Role</Label>
@@ -126,29 +118,6 @@ export default function Profile() {
           </Button>
         </CardContent>
       </Card>
-
-      {canSwitch && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <ArrowRightLeft className="h-5 w-5 text-primary" /> Switch Role
-            </CardTitle>
-            <CardDescription>You have multiple roles. Switch between Lecturer and Moderator views.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Select value={activeRole ?? ""} onValueChange={handleRoleSwitch}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Select role" />
-              </SelectTrigger>
-              <SelectContent>
-                {switchableRoles.map((r) => (
-                  <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-      )}
 
       <Card>
         <CardHeader>

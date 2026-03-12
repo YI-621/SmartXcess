@@ -4,7 +4,7 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { RecentAssessments } from "@/components/dashboard/RecentAssessments";
 import { BloomDistribution } from "@/components/dashboard/BloomDistribution";
 import { useAuth } from "@/hooks/useAuth";
-import { useAssessmentsWithQuestions, useActivityLogs, useLecturerCount } from "@/hooks/useData";
+import { useAssessmentsWithQuestions, useActivityLogs, useLecturerCount, useUserModules } from "@/hooks/useData";
 import { type BloomLevel, type Assessment } from "@/lib/assessment";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,25 @@ const activityColors: Record<string, string> = {
   approved: "text-success",
   rejected: "text-destructive",
 };
+
+const difficultyWeight: Record<Assessment["questions"][number]["difficulty"], number> = {
+  "Very Easy": 1,
+  Easy: 2,
+  Medium: 3,
+  Hard: 4,
+  "Very Hard": 5,
+};
+
+const difficultyFromAverage = (avg: number): Assessment["questions"][number]["difficulty"] => {
+  if (avg < 1.5) return "Very Easy";
+  if (avg < 2.5) return "Easy";
+  if (avg < 3.5) return "Medium";
+  if (avg < 4.5) return "Hard";
+  return "Very Hard";
+};
+
+const normalizeModuleCode = (value: string) => value.trim().toUpperCase();
+const isFlaggedQuestion = (q: Assessment["questions"][number]) => q.similarityScore >= 75 || q.complexity < 60;
 
 function AssessmentDetailDialog({ assessment, open, onClose }: { assessment: Assessment | null; open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
@@ -106,7 +125,7 @@ function LecturerDashboard() {
   const { bloomData, difficultyData, allQuestions } = useChartData(assessments);
 
   const pending = assessments.filter((a) => a.status === "Pending").length;
-  const done = assessments.filter((a) => a.status === "Approved" || a.status === "Reviewed").length;
+  const done = assessments.filter((a) => a.status === "Approved" || a.status === "Done").length;
   const flagged = allQuestions.filter((q) => q.similarityScore > 50 || q.complexity < 30).length;
 
   if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
@@ -155,11 +174,124 @@ function LecturerDashboard() {
 
 function AdminDashboard() {
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
+  const [selectedModuleCode, setSelectedModuleCode] = useState<string | null>(null);
   const { data: dbAssessments, isLoading } = useAssessmentsWithQuestions();
   const { data: dbActivityLogs } = useActivityLogs();
   const { data: lecturerCount } = useLecturerCount();
+  const { data: adminModules = [] } = useUserModules();
 
   const assessments = dbAssessments ?? [];
+  const adminModuleCodes = [...new Set(adminModules.map((m) => normalizeModuleCode(m.module_name)))];
+  const adminModuleSet = new Set(adminModuleCodes);
+  const moduleScopedAssessments = adminModuleSet.size > 0
+    ? assessments.filter((a) => adminModuleSet.has(normalizeModuleCode(a.course)))
+    : [];
+
+  const moduleSummaryRows = adminModuleCodes.map((moduleCode) => {
+    const moduleAssessments = moduleScopedAssessments.filter((a) => normalizeModuleCode(a.course) === moduleCode);
+    const moduleQuestions = moduleAssessments.flatMap((a) => a.questions);
+
+    const avgSimilarity = moduleQuestions.length > 0
+      ? Math.round(moduleQuestions.reduce((sum, q) => sum + q.similarityScore, 0) / moduleQuestions.length)
+      : 0;
+
+    const flaggedAssessments = moduleAssessments.filter((a) => a.flagged || a.questions.some(isFlaggedQuestion));
+    const flaggedAssessmentCount = flaggedAssessments.length;
+    const flaggedQuestionsInFlaggedAssessments = flaggedAssessments.reduce(
+      (sum, assessment) => sum + assessment.questions.filter(isFlaggedQuestion).length,
+      0
+    );
+    const flaggedQuestionShare = moduleQuestions.length > 0
+      ? Math.round((flaggedQuestionsInFlaggedAssessments / moduleQuestions.length) * 100)
+      : 0;
+
+    const avgDifficultyNumeric = moduleQuestions.length > 0
+      ? moduleQuestions.reduce((sum, q) => sum + difficultyWeight[q.difficulty], 0) / moduleQuestions.length
+      : 0;
+
+    const avgDifficulty = moduleQuestions.length > 0
+      ? difficultyFromAverage(avgDifficultyNumeric)
+      : "—";
+
+    const bloomCounts = moduleQuestions.reduce<Record<string, number>>((acc, q) => {
+      acc[q.bloomLevel] = (acc[q.bloomLevel] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    const dominantBloom = Object.entries(bloomCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    const pendingAssessments = moduleAssessments.filter((a) => a.status === "Pending").length;
+
+    return {
+      moduleCode,
+      assessmentsCount: moduleAssessments.length,
+      questionCount: moduleQuestions.length,
+      avgSimilarity,
+      flaggedAssessmentCount,
+      flaggedQuestionsInFlaggedAssessments,
+      flaggedQuestionShare,
+      avgDifficulty,
+      avgComplexity: moduleQuestions.length > 0
+        ? Math.round(moduleQuestions.reduce((sum, q) => sum + q.complexity, 0) / moduleQuestions.length)
+        : 0,
+      dominantBloom,
+      pendingAssessments,
+    };
+  });
+
+  const moduleDetailsByCode = adminModuleCodes.reduce<Record<string, {
+    statusData: Array<{ name: string; count: number; color: string }>;
+    difficultyData: Array<{ name: string; count: number; color: string }>;
+    bloomData: Array<{ name: string; count: number; color: string }>;
+    topLecturers: Array<{ name: string; count: number }>;
+  }>>((acc, moduleCode) => {
+    const moduleAssessments = moduleScopedAssessments.filter((a) => normalizeModuleCode(a.course) === moduleCode);
+    const moduleQuestions = moduleAssessments.flatMap((a) => a.questions);
+
+    const doneCount = moduleAssessments.filter((a) => ["Done", "Approved", "Rejected"].includes(a.status)).length;
+
+    const statusData = [
+      { name: "Pending", count: moduleAssessments.filter((a) => a.status === "Pending").length, color: "hsl(var(--warning))" },
+      { name: "Done", count: doneCount, color: "hsl(var(--success))" },
+    ];
+
+    const difficultyData = [
+      { name: "Very Easy", count: moduleQuestions.filter((q) => q.difficulty === "Very Easy").length, color: "hsl(160, 84%, 39%)" },
+      { name: "Easy", count: moduleQuestions.filter((q) => q.difficulty === "Easy").length, color: "hsl(142, 71%, 45%)" },
+      { name: "Medium", count: moduleQuestions.filter((q) => q.difficulty === "Medium").length, color: "hsl(38, 92%, 50%)" },
+      { name: "Hard", count: moduleQuestions.filter((q) => q.difficulty === "Hard").length, color: "hsl(0, 72%, 51%)" },
+      { name: "Very Hard", count: moduleQuestions.filter((q) => q.difficulty === "Very Hard").length, color: "hsl(0, 72%, 35%)" },
+    ];
+
+    const bloomData = [
+      { name: "Knowledge", count: moduleQuestions.filter((q) => q.bloomLevel === "Knowledge").length, color: "hsl(280, 67%, 50%)" },
+      { name: "Comprehension", count: moduleQuestions.filter((q) => q.bloomLevel === "Comprehension").length, color: "hsl(234, 89%, 56%)" },
+      { name: "Application", count: moduleQuestions.filter((q) => q.bloomLevel === "Application").length, color: "hsl(199, 89%, 48%)" },
+      { name: "Analysis", count: moduleQuestions.filter((q) => q.bloomLevel === "Analysis").length, color: "hsl(142, 71%, 45%)" },
+      { name: "Synthesis", count: moduleQuestions.filter((q) => q.bloomLevel === "Synthesis").length, color: "hsl(38, 92%, 50%)" },
+      { name: "Evaluation", count: moduleQuestions.filter((q) => q.bloomLevel === "Evaluation").length, color: "hsl(0, 72%, 51%)" },
+    ];
+
+    const lecturerCountMap = moduleAssessments.reduce<Record<string, number>>((map, assessment) => {
+      map[assessment.lecturer] = (map[assessment.lecturer] ?? 0) + 1;
+      return map;
+    }, {});
+
+    const topLecturers = Object.entries(lecturerCountMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    acc[moduleCode] = { statusData, difficultyData, bloomData, topLecturers };
+    return acc;
+  }, {});
+
+  const selectedModuleSummary = selectedModuleCode
+    ? moduleSummaryRows.find((row) => row.moduleCode === selectedModuleCode) ?? null
+    : null;
+  const selectedModuleDetails = selectedModuleCode
+    ? moduleDetailsByCode[selectedModuleCode]
+    : undefined;
+
   const activityLogs = (dbActivityLogs ?? []).map((l) => ({
     id: l.id,
     type: l.type,
@@ -263,6 +395,50 @@ function AdminDashboard() {
       </div>
 
       <div className="rounded-xl border border-border bg-card animate-fade-in">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h3 className="text-sm font-semibold text-card-foreground">Module Summary (Under Your Supervision)</h3>
+          <Badge variant="outline" className="font-mono">{adminModuleCodes.length} module(s)</Badge>
+        </div>
+
+        {adminModuleCodes.length === 0 ? (
+          <p className="text-sm text-muted-foreground px-5 py-6">
+            No module codes assigned to this admin yet. Add modules in your profile to view module summaries.
+          </p>
+        ) : moduleSummaryRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground px-5 py-6">
+            No assessment data found for your assigned module codes.
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {moduleSummaryRows.map((row) => (
+              <button
+                key={row.moduleCode}
+                type="button"
+                className="w-full text-left px-5 py-4 hover:bg-muted/50 transition-colors"
+                onClick={() => setSelectedModuleCode(row.moduleCode)}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-card-foreground font-mono">{row.moduleCode}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {row.assessmentsCount} assessment(s), {row.questionCount} question(s), {row.pendingAssessments} pending
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    <Badge variant="outline">Avg Similarity: {row.avgSimilarity}%</Badge>
+                    <Badge variant="outline">Flagged Assessments: {row.flaggedAssessmentCount}</Badge>
+                    <Badge variant="outline">Avg Difficulty: {row.avgDifficulty}</Badge>
+                    <Badge variant="outline">Avg Complexity: {row.avgComplexity}%</Badge>
+                    <Badge variant="outline">Dominant Bloom: {row.dominantBloom}</Badge>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card animate-fade-in">
         <div className="flex items-center gap-2 border-b border-border px-5 py-4">
           <Activity className="h-4 w-4 text-primary" />
           <h3 className="text-sm font-semibold text-card-foreground">Recent Activity</h3>
@@ -285,6 +461,132 @@ function AdminDashboard() {
       </div>
 
       <AssessmentDetailDialog assessment={selectedAssessment} open={!!selectedAssessment} onClose={() => setSelectedAssessment(null)} />
+
+      <Dialog open={!!selectedModuleCode} onOpenChange={(open) => !open && setSelectedModuleCode(null)}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Module Summary: {selectedModuleCode}</DialogTitle>
+          </DialogHeader>
+
+          {!selectedModuleSummary || !selectedModuleDetails ? (
+            <p className="text-sm text-muted-foreground">No summary data available for this module.</p>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard icon={FileText} title="Assessments" value={selectedModuleSummary.assessmentsCount} subtitle="In this module" variant="primary" />
+                <StatCard icon={ClipboardCheck} title="Questions" value={selectedModuleSummary.questionCount} subtitle="Total question pool" variant="success" />
+                <StatCard icon={Flag} title="Flagged Assessments" value={selectedModuleSummary.flaggedAssessmentCount} subtitle="Assessments with flagged questions" variant="destructive" />
+                <StatCard icon={BarChart3} title="Avg Similarity" value={`${selectedModuleSummary.avgSimilarity}%`} subtitle="Module average" variant="warning" />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border p-4">
+                  <h4 className="text-sm font-semibold mb-3">Difficulty Distribution</h4>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie data={selectedModuleDetails.difficultyData} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name }) => name}>
+                        {selectedModuleDetails.difficultyData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="rounded-lg border border-border p-4">
+                  <h4 className="text-sm font-semibold mb-3">Bloom's Taxonomy Distribution</h4>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie data={selectedModuleDetails.bloomData} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name }) => name}>
+                        {selectedModuleDetails.bloomData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border p-4">
+                  <h4 className="text-sm font-semibold mb-3">Assessment Status Breakdown</h4>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={selectedModuleDetails.statusData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="hsl(var(--primary))" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="rounded-lg border border-border p-4">
+                  <h4 className="text-sm font-semibold mb-3">Top Lecturers (By Upload Count)</h4>
+                  {selectedModuleDetails.topLecturers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No lecturer upload data for this module.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedModuleDetails.topLecturers.map((lecturer) => (
+                        <div key={lecturer.name} className="flex items-center justify-between text-sm">
+                          <span className="truncate pr-3">{lecturer.name}</span>
+                          <Badge variant="outline">{lecturer.count} upload(s)</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border p-4">
+                  <h4 className="text-sm font-semibold mb-3">Difficulty Volume by Level</h4>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart
+                      data={selectedModuleDetails.difficultyData.map((item) => ({
+                        name: item.name,
+                        count: item.count,
+                      }))}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip formatter={(value) => [`${value}`, "Questions"]} />
+                      <Bar dataKey="count" fill="hsl(var(--primary))" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="rounded-lg border border-border p-4">
+                  <h4 className="text-sm font-semibold mb-3">Question Health Split</h4>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: "Flagged", count: selectedModuleSummary.flaggedQuestionsInFlaggedAssessments, color: "hsl(var(--destructive))" },
+                          {
+                            name: "Clean",
+                            count: Math.max(0, selectedModuleSummary.questionCount - selectedModuleSummary.flaggedQuestionsInFlaggedAssessments),
+                            color: "hsl(var(--success))",
+                          },
+                        ]}
+                        dataKey="count"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label={({ name }) => name}
+                      >
+                        <Cell fill="hsl(var(--destructive))" />
+                        <Cell fill="hsl(var(--success))" />
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

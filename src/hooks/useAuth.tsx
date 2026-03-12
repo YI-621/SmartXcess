@@ -11,13 +11,14 @@ interface AuthContextType {
   roles: AppRole[];
   activeRole: AppRole | null;
   isAdmin: boolean;
-  profile: { full_name: string | null; department: string | null; avatar_url: string | null } | null;
+  profile: { full_name: string | null; department: string | null; avatar_url: string | null; email: string | null } | null;
   signOut: () => Promise<void>;
   switchRole: (role: AppRole) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const ACTIVE_ROLE_STORAGE_KEY = "smartxcess.activeRole";
+const ROLE_CHANGE_EVENT = "smartxcess-role-changed";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -30,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchUserData = async (userId: string) => {
     const [rolesRes, profileRes] = await Promise.all([
       supabase.from("user_roles").select("role").eq("user_id", userId),
-      supabase.from("profiles").select("full_name, department, avatar_url").eq("user_id", userId).single(),
+      supabase.from("profiles").select("full_name, department, avatar_url, email").eq("user_id", userId).single(),
     ]);
     if (rolesRes.data) {
       const userRoles = rolesRes.data.map((r) => r.role as AppRole);
@@ -54,8 +55,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (roles.includes(role)) {
       setActiveRole(role);
       localStorage.setItem(ACTIVE_ROLE_STORAGE_KEY, role);
+      window.dispatchEvent(new Event(ROLE_CHANGE_EVENT));
     }
   };
+
+  useEffect(() => {
+    const syncRoleFromStorage = () => {
+      const savedRole = localStorage.getItem(ACTIVE_ROLE_STORAGE_KEY) as AppRole | null;
+      if (savedRole && roles.includes(savedRole)) {
+        setActiveRole(savedRole);
+      }
+    };
+
+    window.addEventListener(ROLE_CHANGE_EVENT, syncRoleFromStorage);
+    window.addEventListener("storage", syncRoleFromStorage);
+
+    return () => {
+      window.removeEventListener(ROLE_CHANGE_EVENT, syncRoleFromStorage);
+      window.removeEventListener("storage", syncRoleFromStorage);
+    };
+  }, [roles]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {

@@ -1,3 +1,22 @@
+## Production API Setup
+
+For deployed frontend builds (for example GitHub Pages), configure the backend URL and CORS.
+
+1. Set `VITE_API_BASE_URL` for production builds:
+
+```bash
+# .env.production
+VITE_API_BASE_URL=https://your-backend-domain.com
+```
+
+2. Set backend CORS origins (comma-separated):
+
+```bash
+ALLOWED_ORIGINS=https://<your-gh-pages-domain>,http://localhost:5173,http://localhost:8080
+```
+
+If these are not set, production uploads will fail with `Failed to fetch`.
+
 # Welcome to your Lovable project
 
 ## Project info

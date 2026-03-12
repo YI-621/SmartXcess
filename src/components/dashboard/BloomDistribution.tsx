@@ -27,9 +27,10 @@ export function BloomDistribution() {
         {counts.map((b) => (
           <div key={b.level} className="flex items-center gap-3">
             <span className="text-xs text-muted-foreground w-24 shrink-0">{b.level}</span>
-            <div className="flex-1 h-6 bg-muted rounded-md overflow-hidden">
+            <div className="flex-1 h-6 bg-muted rounded-md overflow-hidden relative">
+              {/* Filled bar overlays background */}
               <div
-                className={`${b.color} h-full rounded-md transition-all duration-700`}
+                className={`absolute top-0 left-0 ${b.color} h-full rounded-md transition-all duration-700`}
                 style={{ width: `${(b.count / max) * 100}%` }}
               />
             </div>

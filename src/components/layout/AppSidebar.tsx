@@ -29,7 +29,7 @@ export function AppSidebar() {
 
   const initials = profile?.full_name
     ? profile.full_name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
-    : user?.email?.[0]?.toUpperCase() ?? "?";
+    : profile?.email?.[0]?.toUpperCase() ?? user?.email?.[0]?.toUpperCase() ?? "?";
 
   const displayRole = activeRole ?? roles[0] ?? "Lecturer";
 
@@ -40,7 +40,7 @@ export function AppSidebar() {
           <ClipboardCheck className="h-4 w-4 text-primary-foreground" />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-foreground">AssessMod</h1>
+          <h1 className="text-sm font-semibold text-foreground">SmartXcess</h1>
           <p className="text-[10px] text-muted-foreground">Assessment Moderator</p>
         </div>
       </div>
@@ -77,7 +77,7 @@ export function AppSidebar() {
             <AvatarFallback className="bg-primary/10 text-primary text-xs">{initials}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{profile?.full_name || user?.email}</p>
+            <p className="text-sm font-medium truncate">{profile?.full_name || profile?.email || user?.email}</p>
             <p className="text-[10px] text-muted-foreground truncate capitalize">{displayRole}</p>
           </div>
         </NavLink>

@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
-import { Shield, Users, Settings, Save, Loader2, Plus, X, BookOpen } from "lucide-react";
+import { Shield, Users, Settings, Save, Loader2, Plus, X, BookOpen, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAssessmentsWithQuestions } from "@/hooks/useData";
 import { useNavigate } from "react-router-dom";
@@ -38,9 +38,16 @@ export default function Admin() {
   const [moderatorModules, setModeratorModules] = useState<ModeratorModule[]>([]);
   const [newModuleCode, setNewModuleCode] = useState("");
   const [selectedModeratorId, setSelectedModeratorId] = useState("");
+  const [pastYearModuleCode, setPastYearModuleCode] = useState("");
+  const [pastYearModuleName, setPastYearModuleName] = useState("");
+  const [pastYearExamYear, setPastYearExamYear] = useState("");
+  const [pastYearExamMonth, setPastYearExamMonth] = useState("");
+  const [pastYearFile, setPastYearFile] = useState<File | null>(null);
+  const [uploadingPastYear, setUploadingPastYear] = useState(false);
   const { toast } = useToast();
   const { data: assessments = [], isLoading: loadingAssessments } = useAssessmentsWithQuestions();
   const flaggedAssessments = assessments.filter((assessment) => assessment.flagged);
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.DEV ? "http://localhost:8000" : "");
 
   useEffect(() => {
     fetchUsers();
@@ -168,6 +175,59 @@ export default function Admin() {
     fetchModeratorModules();
   };
 
+  const uploadPastYearAssessment = async () => {
+    if (!pastYearFile) return;
+    if (!apiBaseUrl) {
+      toast({
+        title: "Backend URL not configured",
+        description: "Set VITE_API_BASE_URL for production deployment.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadingPastYear(true);
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const userId = authData.user?.id;
+      if (!userId) throw new Error("Unable to identify current user");
+
+      const formData = new FormData();
+      formData.append("module_code", pastYearModuleCode.trim().toUpperCase());
+      formData.append("module_name", pastYearModuleName.trim());
+      formData.append("exam_year", pastYearExamYear.trim());
+      formData.append("exam_month", pastYearExamMonth.trim().toUpperCase());
+      formData.append("uploaded_by", userId);
+      formData.append("file", pastYearFile);
+
+      const response = await fetch(`${apiBaseUrl}/api/internal-questions/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.detail ?? payload?.reason ?? "Past-year upload failed");
+      }
+
+      toast({
+        title: "Past year questions uploaded",
+        description: `${payload?.rows ?? 0} question(s) saved to exam_questions.`,
+      });
+
+      setPastYearModuleCode("");
+      setPastYearModuleName("");
+      setPastYearExamYear("");
+      setPastYearExamMonth("");
+      setPastYearFile(null);
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setUploadingPastYear(false);
+    }
+  };
+
   const moderators = users.filter((u) => u.roles.includes("moderator") || u.roles.includes("admin"));
 
   const roleBadgeColor = (role: string) => {
@@ -191,6 +251,7 @@ export default function Admin() {
         <TabsList>
           <TabsTrigger value="users" className="gap-2"><Users className="h-4 w-4" /> Users</TabsTrigger>
           <TabsTrigger value="modules" className="gap-2"><BookOpen className="h-4 w-4" /> Module Assignments</TabsTrigger>
+          <TabsTrigger value="past-year" className="gap-2"><Upload className="h-4 w-4" /> Past Year Upload</TabsTrigger>
           <TabsTrigger value="flagged" className="gap-2"><Shield className="h-4 w-4" /> Flagged</TabsTrigger>
           <TabsTrigger value="settings" className="gap-2"><Settings className="h-4 w-4" /> Settings</TabsTrigger>
         </TabsList>
@@ -310,6 +371,77 @@ export default function Admin() {
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-6">No module assignments yet. Add one above.</p>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="past-year" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Internal Question Bank Upload</CardTitle>
+              <CardDescription>Upload past-year assessment PDFs to save extracted questions into the internal database for similarity checks.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Module Code</Label>
+                  <Input
+                    placeholder="e.g. CSC6000"
+                    value={pastYearModuleCode}
+                    onChange={(e) => setPastYearModuleCode(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Module Name</Label>
+                  <Input
+                    placeholder="e.g. Data Structures and Algorithms"
+                    value={pastYearModuleName}
+                    onChange={(e) => setPastYearModuleName(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Exam Year</Label>
+                  <Input
+                    placeholder="e.g. 2023"
+                    value={pastYearExamYear}
+                    onChange={(e) => setPastYearExamYear(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Exam Month</Label>
+                  <Input
+                    placeholder="e.g. APRIL"
+                    value={pastYearExamMonth}
+                    onChange={(e) => setPastYearExamMonth(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Assessment PDF</Label>
+                <Input
+                  type="file"
+                  accept=".pdf"
+                  onChange={(e) => setPastYearFile(e.target.files?.[0] ?? null)}
+                />
+                {pastYearFile && (
+                  <p className="text-xs text-muted-foreground">
+                    Selected: {pastYearFile.name} ({(pastYearFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+              </div>
+
+              <Button
+                className="gap-2"
+                onClick={uploadPastYearAssessment}
+                disabled={uploadingPastYear || !pastYearFile || !pastYearModuleCode.trim() || !pastYearModuleName.trim() || !pastYearExamYear.trim() || !pastYearExamMonth.trim()}
+              >
+                {uploadingPastYear ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploadingPastYear ? "Uploading..." : "Upload to internal database"}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

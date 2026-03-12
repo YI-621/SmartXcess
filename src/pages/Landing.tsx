@@ -13,7 +13,7 @@ export default function Landing() {
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
             <ClipboardCheck className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-lg font-semibold text-foreground">AssessMod</span>
+          <span className="text-lg font-semibold text-foreground">SmartXcess</span>
         </div>
         <Button onClick={() => navigate("/auth")} variant="outline">
           Sign In
@@ -56,7 +56,7 @@ export default function Landing() {
       </main>
 
       <footer className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} AssessMod. All rights reserved.
+        © {new Date().getFullYear()} SmartXcess. All rights reserved.
       </footer>
     </div>
   );

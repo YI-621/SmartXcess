@@ -78,6 +78,7 @@ interface ModerationThresholds {
 }
 
 type AssessmentStatusMap = Record<string, string>;
+type UserModuleMap = Record<string, string[]>;
 
 function toPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -117,6 +118,66 @@ function splitKeywords(raw: string | null): string[] {
     .filter(Boolean);
 }
 
+function romanToNumber(input: string): number {
+  const roman = input.toUpperCase();
+  const values: Record<string, number> = {
+    I: 1,
+    V: 5,
+    X: 10,
+    L: 50,
+    C: 100,
+    D: 500,
+    M: 1000,
+  };
+
+  let total = 0;
+  for (let i = 0; i < roman.length; i += 1) {
+    const current = values[roman[i]] ?? 0;
+    const next = values[roman[i + 1]] ?? 0;
+    total += current < next ? -current : current;
+  }
+  return total;
+}
+
+function parseQuestionSequence(questionId: string | null | undefined): [number, number, number] {
+  if (!questionId) return [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
+
+  // Supports IDs like: Q1, Q1_a, Q1_a_i, prefix_Q2_b_ii
+  const qMatch = questionId.match(/(?:^|_)Q([0-9IVXLCDM]+)/i);
+  if (!qMatch) return [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
+
+  const qRaw = qMatch[1] ?? "";
+  const main = /^\d+$/.test(qRaw) ? Number.parseInt(qRaw, 10) : romanToNumber(qRaw);
+
+  const tail = questionId.slice(qMatch.index! + qMatch[0].length);
+  const parts = tail.split("_").filter(Boolean);
+
+  const letterPart = parts[0]?.toLowerCase();
+  const letter = letterPart && /^[a-z]$/.test(letterPart)
+    ? letterPart.charCodeAt(0) - "a".charCodeAt(0) + 1
+    : Number.MAX_SAFE_INTEGER;
+
+  const romanPart = parts[1]?.toLowerCase();
+  const sub = romanPart && /^[ivxlcdm]+$/.test(romanPart)
+    ? romanToNumber(romanPart)
+    : Number.MAX_SAFE_INTEGER;
+
+  return [Number.isFinite(main) && main > 0 ? main : Number.MAX_SAFE_INTEGER, letter, sub];
+}
+
+function sortRowsByQuestionSequence(rows: DbQuestionAnalysisRow[]): DbQuestionAnalysisRow[] {
+  return [...rows].sort((a, b) => {
+    const aSeq = parseQuestionSequence(a.question_id);
+    const bSeq = parseQuestionSequence(b.question_id);
+
+    if (aSeq[0] !== bSeq[0]) return aSeq[0] - bSeq[0];
+    if (aSeq[1] !== bSeq[1]) return aSeq[1] - bSeq[1];
+    if (aSeq[2] !== bSeq[2]) return aSeq[2] - bSeq[2];
+
+    return (a.question_id ?? "").localeCompare(b.question_id ?? "", undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
 function parseSettingNumber(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -124,6 +185,10 @@ function parseSettingNumber(value: unknown, fallback: number): number {
     if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
+}
+
+function normalizeModuleCode(value: string | null | undefined): string {
+  return (value ?? "").trim().toUpperCase();
 }
 
 async function fetchModerationThresholds(): Promise<ModerationThresholds> {
@@ -167,6 +232,46 @@ async function fetchAssessmentStatusMap(): Promise<AssessmentStatusMap> {
   }
 
   return map;
+}
+
+async function fetchUserModuleMap(): Promise<UserModuleMap> {
+  const { data, error } = await supabase
+    .from("system_settings")
+    .select("value")
+    .eq("key", "user_module_map")
+    .maybeSingle();
+
+  if (error || !data?.value || typeof data.value !== "object" || Array.isArray(data.value)) {
+    return {};
+  }
+
+  const output: UserModuleMap = {};
+  for (const [userId, rawModules] of Object.entries(data.value as Record<string, unknown>)) {
+    if (!Array.isArray(rawModules)) continue;
+    const normalized = rawModules
+      .map((moduleCode) => (typeof moduleCode === "string" ? normalizeModuleCode(moduleCode) : ""))
+      .filter(Boolean);
+    output[userId] = [...new Set(normalized)];
+  }
+
+  return output;
+}
+
+async function upsertUserModuleMap(nextMap: UserModuleMap): Promise<void> {
+  const { error } = await supabase
+    .from("system_settings")
+    .upsert({ key: "user_module_map", value: nextMap } as any, { onConflict: "key" });
+
+  if (error) throw error;
+}
+
+async function fetchCurrentUserModuleCodes(userId: string, defaultModuleCode?: string | null): Promise<string[]> {
+  const userModuleMap = await fetchUserModuleMap();
+  const mappedModules = userModuleMap[userId] ?? [];
+  const fallbackModule = normalizeModuleCode(defaultModuleCode);
+
+  const merged = [...mappedModules, ...(fallbackModule ? [fallbackModule] : [])];
+  return [...new Set(merged)];
 }
 
 function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Question {
@@ -228,8 +333,9 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
 
   const assessments: Assessment[] = [];
   for (const [key, groupRows] of grouped.entries()) {
-    const first = groupRows[0];
-    const questions = groupRows.map(mapAnalysisRowToQuestion);
+    const orderedRows = sortRowsByQuestionSequence(groupRows);
+    const first = orderedRows[0];
+    const questions = orderedRows.map(mapAnalysisRowToQuestion);
     const avgComplexity = questions.length
       ? Math.round(questions.reduce((sum, q) => sum + q.complexity, 0) / questions.length)
       : 0;
@@ -271,12 +377,38 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
   return assessments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-function filterAssessmentsByRole(assessments: Assessment[], userId: string | null | undefined, activeRole: string | null | undefined): Assessment[] {
+async function filterAssessmentsByRole(
+  assessments: Assessment[],
+  userId: string | null | undefined,
+  activeRole: string | null | undefined
+): Promise<Assessment[]> {
   if (activeRole !== "lecturer") return assessments;
   if (!userId) return [];
 
   // Group key format includes uploader ID: filename::module::uploaded_by::date.
   return assessments.filter((assessment) => assessment.id.split("::")[2] === userId);
+}
+
+async function applyAssessmentRoleFilter(
+  assessments: Assessment[],
+  userId: string | null | undefined,
+  activeRole: string | null | undefined,
+  defaultModuleCode?: string | null
+): Promise<Assessment[]> {
+  if (!userId) return [];
+
+  if (activeRole === "lecturer") {
+    return filterAssessmentsByRole(assessments, userId, activeRole);
+  }
+
+  if (activeRole === "moderator") {
+    const allowedModules = await fetchCurrentUserModuleCodes(userId, defaultModuleCode);
+    if (allowedModules.length === 0) return [];
+    const allowedSet = new Set(allowedModules.map(normalizeModuleCode));
+    return assessments.filter((assessment) => allowedSet.has(normalizeModuleCode(assessment.course)));
+  }
+
+  return assessments;
 }
 
 // Convert DB assessment + questions to the frontend Assessment shape
@@ -313,14 +445,16 @@ export function toFrontendAssessment(a: DbAssessment, questions: DbQuestion[], l
 
 export function useAssessments() {
   const { user, activeRole } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["assessments", activeRole, user?.id],
+    queryKey: ["assessments", activeRole, user?.id, defaultModuleCode],
     queryFn: async () => {
-      const assessments = filterAssessmentsByRole(
+      const assessments = await applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
-        activeRole
+        activeRole,
+        defaultModuleCode
       );
       return assessments.map((a) => ({
         id: a.id,
@@ -343,15 +477,17 @@ export function useAssessments() {
 
 export function useAssessmentWithQuestions(id: string | null) {
   const { user, activeRole } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["assessment", id, activeRole, user?.id],
+    queryKey: ["assessment", id, activeRole, user?.id, defaultModuleCode],
     enabled: !!id,
     queryFn: async () => {
-      const assessments = filterAssessmentsByRole(
+      const assessments = await applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
-        activeRole
+        activeRole,
+        defaultModuleCode
       );
       return assessments.find((a) => a.id === id!) ?? null;
     },
@@ -360,14 +496,16 @@ export function useAssessmentWithQuestions(id: string | null) {
 
 export function useAssessmentsWithQuestions() {
   const { user, activeRole } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["assessments-full", activeRole, user?.id],
+    queryKey: ["assessments-full", activeRole, user?.id, defaultModuleCode],
     queryFn: async () => {
-      return filterAssessmentsByRole(
+      return applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
-        activeRole
+        activeRole,
+        defaultModuleCode
       );
     },
   });
@@ -375,15 +513,17 @@ export function useAssessmentsWithQuestions() {
 
 export function useQuestions(assessmentId: string | null) {
   const { user, activeRole } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["questions", assessmentId, activeRole, user?.id],
+    queryKey: ["questions", assessmentId, activeRole, user?.id, defaultModuleCode],
     enabled: !!assessmentId,
     queryFn: async () => {
-      const assessments = filterAssessmentsByRole(
+      const assessments = await applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
-        activeRole
+        activeRole,
+        defaultModuleCode
       );
       const assessment = assessments.find((a) => a.id === assessmentId!);
       return (assessment?.questions ?? []).map((q, index) => ({
@@ -492,10 +632,43 @@ export function useUpdateAssessmentStatus() {
 }
 
 export function useActivityLogs() {
+  const { user, activeRole } = useAuth();
+
   return useQuery({
-    queryKey: ["activity-logs"],
+    queryKey: ["activity-logs", activeRole, user?.id],
+    enabled: !!user,
     queryFn: async () => {
-      return [] as DbActivityLog[];
+      if (!user) return [] as DbActivityLog[];
+
+      const baseQuery = (supabase.from("activity_logs" as any) as any)
+        .select("id, type, description, user_id, user_name, assessment_id, created_at")
+        .order("created_at", { ascending: false })
+        .limit(30);
+
+      if (activeRole === "admin") {
+        const { data: supervisedRoles, error: roleError } = await (supabase.from("user_roles") as any)
+          .select("user_id, role")
+          .in("role", ["lecturer", "moderator"]);
+
+        if (roleError) throw roleError;
+
+        const supervisedUserIds = [
+          ...new Set(
+            ((supervisedRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
+          ),
+        ] as string[];
+
+        if (supervisedUserIds.length === 0) return [] as DbActivityLog[];
+
+        const { data, error } = await baseQuery.in("user_id", supervisedUserIds);
+        if (error) throw error;
+        return (data ?? []) as DbActivityLog[];
+      }
+
+      const { data, error } = await baseQuery.eq("user_id", user.id);
+      if (error) throw error;
+
+      return (data ?? []) as DbActivityLog[];
     },
   });
 }
@@ -506,7 +679,18 @@ export function useLogActivity() {
 
   return useMutation({
     mutationFn: async ({ type, description, assessmentId }: { type: string; description: string; assessmentId?: string }) => {
-      if (!user || !type || !description || assessmentId === undefined) return;
+      if (!user || !type || !description) return;
+
+      const userName = profile?.full_name ?? user.email ?? "Unknown";
+      const { error } = await (supabase.from("activity_logs" as any) as any).insert({
+        type,
+        description,
+        user_id: user.id,
+        user_name: userName,
+        assessment_id: assessmentId ?? null,
+      });
+
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
@@ -516,11 +700,21 @@ export function useLogActivity() {
 
 export function useUserModules() {
   const { user } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
+
   return useQuery({
-    queryKey: ["user-modules", user?.id],
+    queryKey: ["user-modules", user?.id, defaultModuleCode],
     enabled: !!user,
     queryFn: async () => {
-      return [] as DbUserModule[];
+      if (!user) return [] as DbUserModule[];
+
+      const moduleCodes = await fetchCurrentUserModuleCodes(user.id, defaultModuleCode);
+      return moduleCodes.map((moduleCode) => ({
+        id: `${user.id}:${moduleCode}`,
+        user_id: user.id,
+        module_name: moduleCode,
+        created_at: "",
+      }));
     },
   });
 }
@@ -532,22 +726,50 @@ export function useAddModule() {
   return useMutation({
     mutationFn: async (moduleName: string) => {
       if (!user || !moduleName) return;
+
+      const moduleCode = normalizeModuleCode(moduleName);
+      if (!moduleCode) return;
+
+      const map = await fetchUserModuleMap();
+      const existing = map[user.id] ?? [];
+      map[user.id] = [...new Set([...existing, moduleCode])];
+      await upsertUserModuleMap(map);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-modules"] });
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["assessments-full"] });
+      queryClient.invalidateQueries({ queryKey: ["assessment"] });
     },
   });
 }
 
 export function useRemoveModule() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useMutation({
     mutationFn: async (moduleId: string) => {
-      if (!moduleId) return;
+      if (!moduleId || !user) return;
+
+      const map = await fetchUserModuleMap();
+      const current = map[user.id] ?? [];
+      const [, moduleCodeRaw] = moduleId.split(":");
+      const moduleCode = normalizeModuleCode(moduleCodeRaw);
+      const fallbackModule = normalizeModuleCode(defaultModuleCode);
+
+      // Do not allow removing the registered default module code.
+      if (moduleCode && moduleCode === fallbackModule) return;
+
+      map[user.id] = current.filter((code) => normalizeModuleCode(code) !== moduleCode);
+      await upsertUserModuleMap(map);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-modules"] });
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["assessments-full"] });
+      queryClient.invalidateQueries({ queryKey: ["assessment"] });
     },
   });
 }

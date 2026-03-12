@@ -77,6 +77,7 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
         <span className="shrink-0 text-xs font-mono font-medium text-muted-foreground">{question.marks} marks</span>
       </div>
 
+
       <div className="grid grid-cols-2 gap-3">
         <DifficultyBars difficulty={question.difficulty} />
         <ScoreBar label="Similarity" value={question.similarityScore} variant={similarityVariant} />

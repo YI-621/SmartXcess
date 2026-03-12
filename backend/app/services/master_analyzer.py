@@ -540,6 +540,102 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
         return {"saved": False, "reason": "no_words_processed", "rows": 0, "overall_similarity": 0}
     print("=" * 80)
 
+
+def _is_admin_user(user_id: str) -> bool:
+    try:
+        response = (
+            supabase
+            .table("user_roles")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .eq("role", "admin")
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+    except Exception:
+        return False
+
+
+def process_and_save_internal_questions(
+    pdf_filename,
+    module_code,
+    module_name,
+    exam_year,
+    exam_month,
+    uploaded_by,
+):
+    if not _is_admin_user(uploaded_by):
+        return {
+            "saved": False,
+            "reason": "forbidden_admin_only",
+            "rows": 0,
+        }
+
+    print(f"\n📚 INTERNAL BANK INGEST: Processing {pdf_filename}...")
+
+    lines = extract_pdf_lines(pdf_filename)
+    raw_text = "\n".join(lines)
+    paper_prefix = f"{module_code}_{exam_year}_{exam_month}"
+    exam_data = parse_exam(raw_text, paper_id=paper_prefix)
+
+    if not exam_data:
+        return {
+            "saved": False,
+            "reason": "no_questions_extracted",
+            "rows": 0,
+        }
+
+    rows_to_insert = []
+    for q_id, q_text in exam_data.items():
+        final_q_id = q_id.replace("QL", "Q1")
+        query_vector = model.encode(q_text).tolist()
+        rows_to_insert.append({
+            "question_id": final_q_id,
+            "question_text": q_text,
+            "module_code": module_code,
+            "module_name": module_name,
+            "exam_year": exam_year,
+            "exam_month": exam_month,
+            "uploaded_by": uploaded_by,
+            "embedding": query_vector,
+        })
+
+    try:
+        candidate_rows = copy.deepcopy(rows_to_insert)
+
+        # If Supabase schema lags behind the code, remove unknown columns and retry.
+        while True:
+            try:
+                supabase.table("exam_questions").insert(candidate_rows).execute()
+                break
+            except Exception as insert_error:
+                error_text = str(insert_error)
+                missing_col_match = re.search(r"Could not find the '([^']+)' column", error_text)
+                if not missing_col_match:
+                    raise
+
+                missing_col = missing_col_match.group(1)
+                print(f"   ⚠ Schema mismatch on exam_questions: dropping column '{missing_col}' and retrying...")
+                for row in candidate_rows:
+                    row.pop(missing_col, None)
+
+        return {
+            "saved": True,
+            "reason": "ok",
+            "rows": len(rows_to_insert),
+            "module_code": module_code,
+            "module_name": module_name,
+            "exam_year": exam_year,
+            "exam_month": exam_month,
+        }
+    except Exception as e:
+        return {
+            "saved": False,
+            "reason": f"database_error: {e}",
+            "rows": len(rows_to_insert),
+        }
+
 # ==========================================
 # 7. MAIN LECTURER INTERFACE
 # ==========================================

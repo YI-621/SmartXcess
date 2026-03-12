@@ -5,10 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ClipboardCheck, Loader2, ShieldCheck } from "lucide-react";
+import { ClipboardCheck, Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const sanitizeInput = (input: string) => input.replace(/['";<>=]/g, "");
+type AppRole = "admin" | "moderator" | "lecturer";
+const ACTIVE_ROLE_STORAGE_KEY = "smartxcess.activeRole";
+const ROLE_CHANGE_EVENT = "smartxcess-role-changed";
 
 const sendAuditLog = async (action: string, documentName = "N/A", attemptEmail?: string) => {
   try {
@@ -34,11 +37,12 @@ const sendAuditLog = async (action: string, documentName = "N/A", attemptEmail?:
 };
 
 export default function Auth() {
-  const [view, setView] = useState<"auth" | "setup-2fa" | "verify-2fa">("auth");
+  const [view, setView] = useState<"auth" | "setup-2fa" | "verify-2fa" | "choose-role">("auth");
   const [isLogin, setIsLogin] = useState(true);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState("");
   const [department, setDepartment] = useState("");
   const [moduleCode, setModuleCode] = useState("");
@@ -46,6 +50,7 @@ export default function Auth() {
   const [mfaCode, setMfaCode] = useState("");
   const [factorId, setFactorId] = useState("");
   const [qrCode, setQrCode] = useState("");
+  const [availableRoles, setAvailableRoles] = useState<AppRole[]>([]);
 
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -57,7 +62,58 @@ export default function Auth() {
     setMfaCode("");
     setFactorId("");
     setQrCode("");
+    setAvailableRoles([]);
     setLoading(false);
+  };
+
+  const getLandingRoute = (role: AppRole) => {
+    if (role === "moderator") return "/moderate";
+    if (role === "admin") return "/admin";
+    return "/dashboard";
+  };
+
+  const completePostMfaFlow = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      toast({ title: "Session error", description: "Unable to load signed-in user.", variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+
+    const { data: rolesData, error: rolesError } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id);
+
+    if (rolesError) {
+      toast({ title: "Role load failed", description: rolesError.message, variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+
+    const roles = [...new Set((rolesData ?? []).map((r) => r.role as AppRole))];
+    await sendAuditLog("USER_LOGIN_SUCCESS", "System Access", email || user.email || undefined);
+
+    if (roles.length > 1) {
+      setAvailableRoles(roles);
+      setView("choose-role");
+      setLoading(false);
+      return;
+    }
+
+    const selected = roles[0] ?? "lecturer";
+    localStorage.setItem(ACTIVE_ROLE_STORAGE_KEY, selected);
+    window.dispatchEvent(new Event(ROLE_CHANGE_EVENT));
+    navigate(getLandingRoute(selected));
+  };
+
+  const chooseRoleAndContinue = (role: AppRole) => {
+    localStorage.setItem(ACTIVE_ROLE_STORAGE_KEY, role);
+    window.dispatchEvent(new Event(ROLE_CHANGE_EVENT));
+    navigate(getLandingRoute(role));
   };
 
   const check2FA = async () => {
@@ -65,8 +121,7 @@ export default function Auth() {
     const { data: factors } = await supabase.auth.mfa.listFactors();
 
     if (levelData?.currentLevel === "aal2") {
-      await sendAuditLog("USER_LOGIN_SUCCESS", "System Access", email);
-      navigate("/dashboard");
+      await completePostMfaFlow();
       return;
     }
 
@@ -90,7 +145,7 @@ export default function Auth() {
 
     const { data, error } = await supabase.auth.mfa.enroll({
       factorType: "totp",
-      issuer: "AssessMod",
+      issuer: "SmartXcess",
       friendlyName: email,
     });
 
@@ -131,8 +186,7 @@ export default function Auth() {
     }
 
     toast({ title: "Success", description: "Two-factor authentication verified." });
-    await sendAuditLog("USER_LOGIN_SUCCESS", "System Access", email);
-    navigate("/dashboard");
+    await completePostMfaFlow();
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -142,7 +196,16 @@ export default function Auth() {
     if (isLogin) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        toast({ title: "Login failed", description: error.message, variant: "destructive" });
+        const normalizedMessage = error.message.toLowerCase();
+        if (normalizedMessage.includes("invalid login credentials")) {
+          toast({
+            title: "Unregistered user",
+            description: "No account found for this email. Please sign up first.",
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: "Login failed", description: error.message, variant: "destructive" });
+        }
         await sendAuditLog("LOGIN_FAILED", "Authentication System", email);
         setLoading(false);
       } else {
@@ -181,11 +244,12 @@ export default function Auth() {
               <ShieldCheck className="h-6 w-6 text-primary-foreground" />
             )}
           </div>
-          <CardTitle className="text-2xl font-bold">AssessMod</CardTitle>
+          <CardTitle className="text-2xl font-bold">SmartXcess</CardTitle>
           <CardDescription>
             {view === "auth" && (isLogin ? "Sign in to your account" : "Create a new account")}
             {view === "setup-2fa" && "Secure your account with 2FA"}
             {view === "verify-2fa" && "Two-factor authentication"}
+            {view === "choose-role" && "Choose your role for this session"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -219,7 +283,25 @@ export default function Auth() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -288,6 +370,24 @@ export default function Auth() {
                 Back to Sign In
               </Button>
             </form>
+          )}
+
+          {view === "choose-role" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground text-center">
+                You have multiple roles. Select one to continue.
+              </p>
+              <div className="space-y-2">
+                {availableRoles.map((role) => (
+                  <Button key={role} type="button" className="w-full capitalize" onClick={() => chooseRoleAndContinue(role)}>
+                    Continue as {role}
+                  </Button>
+                ))}
+              </div>
+              <Button type="button" variant="ghost" className="w-full" onClick={resetToAuthView}>
+                Back to Sign In
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
