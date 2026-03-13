@@ -71,6 +71,7 @@ export interface Assessment {
   title: string;
   course: string;
   lecturer: string;
+  uploadedBy?: string;
   moderator?: string;
   date: string;
   status: AssessmentStatus;

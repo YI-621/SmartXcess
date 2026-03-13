@@ -495,6 +495,7 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
       title: first.filename ?? "Untitled Analysis",
       course: first.module_code ?? "N/A",
       lecturer: first.uploaded_by ? profileMap.get(first.uploaded_by) ?? "Unknown" : "Unknown",
+      uploadedBy: first.uploaded_by ?? undefined,
       moderator: undefined,
       date: first.created_at ? new Date(first.created_at).toLocaleDateString() : "N/A",
       status: resolvedStatus,
@@ -522,8 +523,10 @@ async function filterAssessmentsByRole(
   if (activeRole !== "lecturer") return assessments;
   if (!userId) return [];
 
-  // Group key format includes uploader ID: filename::module::uploaded_by::date.
-  return assessments.filter((assessment) => assessment.id.split("::")[2] === userId);
+  return assessments.filter((assessment) => {
+    const uploader = assessment.uploadedBy ?? parseAssessmentGroupingKey(assessment.id)?.uploadedBy;
+    return uploader === userId;
+  });
 }
 
 async function applyAssessmentRoleFilter(
@@ -541,11 +544,14 @@ async function applyAssessmentRoleFilter(
   if (activeRole === "moderator") {
     const allowedModules = await fetchCurrentUserModuleCodes(userId, defaultModuleCode);
     if (allowedModules.length === 0) {
-      return assessments.filter((assessment) => assessment.id.split("::")[2] === userId);
+      return assessments.filter((assessment) => {
+        const uploader = assessment.uploadedBy ?? parseAssessmentGroupingKey(assessment.id)?.uploadedBy;
+        return uploader === userId;
+      });
     }
     const allowedSet = new Set(allowedModules.map(normalizeModuleCode));
     return assessments.filter((assessment) => {
-      const uploadedBy = assessment.id.split("::")[2];
+      const uploadedBy = assessment.uploadedBy ?? parseAssessmentGroupingKey(assessment.id)?.uploadedBy;
       return uploadedBy === userId || allowedSet.has(normalizeModuleCode(assessment.course));
     });
   }
