@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, Loader2, ArrowLeft, FileText } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useAssessmentWithQuestions, useAssessmentsWithQuestions, useModerationComments, useSaveComment, useUpdateAssessmentStatus, useLogActivity } from "@/hooks/useData";
+import { useAssessmentWithQuestions, useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,11 @@ const Moderate = () => {
 
   // If no ID selected, show list of assigned assessments
   const { data: allAssessments, isLoading: listLoading } = useAssessmentsWithQuestions();
-  const assignedAssessments = allAssessments?.filter((a) => a.status === "Pending") ?? [];
+  const assignedAssessments = (allAssessments ?? []).filter((a) => {
+    if (a.status !== "Pending") return false;
+    if (!user?.id) return true;
+    return !(a.moderationProgress?.completedModeratorIds ?? []).includes(user.id);
+  });
 
   // Single assessment view
   const { data: dbAssessment, isLoading } = useAssessmentWithQuestions(id);
@@ -38,7 +42,6 @@ const Moderate = () => {
     assessmentId: id,
   });
   const saveComment = useSaveComment();
-  const updateStatus = useUpdateAssessmentStatus();
   const logActivity = useLogActivity();
 
   const [comments, setComments] = useState<Record<string, string>>({});
@@ -46,28 +49,28 @@ const Moderate = () => {
   const existingComments = useMemo(() => {
     const map: Record<string, string> = {};
     (dbComments ?? []).forEach((c) => {
+      if (user?.id && c.user_id !== user.id) return;
       map[c.question_id] = c.comment;
     });
     return map;
-  }, [dbComments]);
+  }, [dbComments, user?.id]);
 
   const handleCommentChange = (questionId: string, value: string) => {
     setComments((prev) => ({ ...prev, [questionId]: value }));
   };
 
   const handleDone = async () => {
-    if (id && dbAssessment) {
+    if (id && dbAssessment && user?.id) {
       const publishTargets = dbAssessment.questions
-        .map((q) => ({ questionId: q.id, comment: comments[q.id] }))
+        .map((q) => ({ assessmentId: id, questionId: q.id, comment: comments[q.id] }))
         .filter((item) => item.comment !== undefined);
 
       if (publishTargets.length > 0) {
         await Promise.all(publishTargets.map((item) => saveComment.mutateAsync(item)));
       }
 
-      updateStatus.mutate({ id, status: "Done" });
       logActivity.mutate({ type: "moderation_complete", description: `${assessment!.title} moderation completed`, assessmentId: id });
-      toast({ title: "Assessment marked as done", description: "The lecturer can now see your comments." });
+      toast({ title: "Moderation submitted", description: "Your moderation has been recorded for this assessment." });
       setSearchParams({});
     }
   };
@@ -123,7 +126,10 @@ const Moderate = () => {
     return <div className="text-center py-20 text-muted-foreground">Assessment not found.</div>;
   }
 
-  const isReviewed = assessment.status === "Done";
+  const completedByCurrentModerator = !!user?.id && (assessment.moderationProgress?.completedModeratorIds ?? []).includes(user.id);
+  const isReviewed = assessment.status === "Done" || completedByCurrentModerator;
+  const assignedCount = assessment.moderationProgress?.assigned ?? 0;
+  const completedCount = assessment.moderationProgress?.completed ?? 0;
 
   return (
     <div className="space-y-6">
@@ -141,6 +147,9 @@ const Moderate = () => {
             </div>
             <p className="text-sm text-muted-foreground mt-1">
               Module: {assessment.course} · Uploaded by: {assessment.lecturer} · {assessment.date}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Moderation progress: {completedCount}/{assignedCount} moderator(s) completed
             </p>
           </div>
         </div>

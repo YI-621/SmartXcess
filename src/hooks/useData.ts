@@ -85,6 +85,8 @@ interface ModerationThresholds {
 
 type AssessmentStatusMap = Record<string, string>;
 type UserModuleMap = Record<string, string[]>;
+type ModerationCommentsMap = Record<string, Record<string, Record<string, string>>>;
+type ModerationCompletionMap = Record<string, string[]>;
 
 function toPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -292,6 +294,28 @@ async function upsertUserModuleMap(nextMap: UserModuleMap): Promise<void> {
   if (error) throw error;
 }
 
+async function fetchModerationCommentsMap(): Promise<ModerationCommentsMap> {
+  const { data, error } = await supabase
+    .from("system_settings")
+    .select("value")
+    .eq("key", "moderation_comments_map")
+    .maybeSingle();
+
+  if (error || !data?.value || typeof data.value !== "object" || Array.isArray(data.value)) {
+    return {};
+  }
+
+  return data.value as ModerationCommentsMap;
+}
+
+async function upsertModerationCommentsMap(nextMap: ModerationCommentsMap): Promise<void> {
+  const { error } = await supabase
+    .from("system_settings")
+    .upsert({ key: "moderation_comments_map", value: nextMap } as any, { onConflict: "key" });
+
+  if (error) throw error;
+}
+
 async function fetchCurrentUserModuleCodes(userId: string, defaultModuleCode?: string | null): Promise<string[]> {
   const userModuleMap = await fetchUserModuleMap();
   const mappedModules = userModuleMap[userId] ?? [];
@@ -299,6 +323,53 @@ async function fetchCurrentUserModuleCodes(userId: string, defaultModuleCode?: s
 
   const merged = [...mappedModules, ...(fallbackModule ? [fallbackModule] : [])];
   return [...new Set(merged)];
+}
+
+async function fetchModeratorAssignmentsByModule(): Promise<Map<string, string[]>> {
+  const [userModuleMap, rolesRes] = await Promise.all([
+    fetchUserModuleMap(),
+    supabase.from("user_roles").select("user_id, role").eq("role", "moderator"),
+  ]);
+
+  const moderatorIds = new Set((rolesRes.data ?? []).map((row) => row.user_id));
+  const byModule = new Map<string, Set<string>>();
+
+  for (const [userId, modules] of Object.entries(userModuleMap)) {
+    if (!moderatorIds.has(userId)) continue;
+
+    for (const moduleCode of modules) {
+      const key = normalizeModuleCode(moduleCode);
+      if (!key) continue;
+      const current = byModule.get(key) ?? new Set<string>();
+      current.add(userId);
+      byModule.set(key, current);
+    }
+  }
+
+  return new Map([...byModule.entries()].map(([moduleCode, ids]) => [moduleCode, [...ids]]));
+}
+
+async function fetchModerationCompletionMap(): Promise<ModerationCompletionMap> {
+  const { data, error } = await (supabase.from("activity_logs" as any) as any)
+    .select("assessment_id, user_id")
+    .eq("type", "moderation_complete")
+    .not("assessment_id", "is", null);
+
+  if (error || !data) return {};
+
+  const grouped = new Map<string, Set<string>>();
+  for (const row of data as Array<{ assessment_id: string | null; user_id: string | null }>) {
+    if (!row.assessment_id || !row.user_id) continue;
+    const set = grouped.get(row.assessment_id) ?? new Set<string>();
+    set.add(row.user_id);
+    grouped.set(row.assessment_id, set);
+  }
+
+  const out: ModerationCompletionMap = {};
+  for (const [assessmentId, ids] of grouped.entries()) {
+    out[assessmentId] = [...ids];
+  }
+  return out;
 }
 
 function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Question {
@@ -347,13 +418,15 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
 }
 
 async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
-  const [{ data: rows, error }, thresholds, statusMap] = await Promise.all([
+  const [{ data: rows, error }, thresholds, statusMap, moderatorsByModule, completionMap] = await Promise.all([
     supabase
       .from("question_analysis_results")
       .select("*")
       .order("created_at", { ascending: false }),
     fetchModerationThresholds(),
     fetchAssessmentStatusMap(),
+    fetchModeratorAssignmentsByModule(),
+    fetchModerationCompletionMap(),
   ]);
 
   if (error) throw error;
@@ -404,6 +477,19 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
       reasons.push(`Average complexity below threshold (${avgComplexity}% < ${thresholds.complexityThreshold}%)`);
     }
 
+    const assignedModeratorIds = moderatorsByModule.get(normalizeModuleCode(first.module_code ?? "")) ?? [];
+    const completedModeratorIds = completionMap[key] ?? [];
+    const completedAssignedModeratorIds = assignedModeratorIds.filter((moderatorId) => completedModeratorIds.includes(moderatorId));
+
+    const explicitStatus = normalizeAssessmentStatus(statusMap[key] ?? "Pending");
+    const allAssignedDone = assignedModeratorIds.length > 0 && completedAssignedModeratorIds.length >= assignedModeratorIds.length;
+    const resolvedStatus =
+      explicitStatus === "Approved" || explicitStatus === "Rejected"
+        ? explicitStatus
+        : allAssignedDone
+          ? "Done"
+          : "Pending";
+
     assessments.push({
       id: key,
       title: first.filename ?? "Untitled Analysis",
@@ -411,7 +497,13 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
       lecturer: first.uploaded_by ? profileMap.get(first.uploaded_by) ?? "Unknown" : "Unknown",
       moderator: undefined,
       date: first.created_at ? new Date(first.created_at).toLocaleDateString() : "N/A",
-      status: normalizeAssessmentStatus(statusMap[key] ?? "Pending"),
+      status: resolvedStatus,
+      moderationProgress: {
+        assigned: assignedModeratorIds.length,
+        completed: completedAssignedModeratorIds.length,
+        assignedModeratorIds,
+        completedModeratorIds: completedAssignedModeratorIds,
+      },
       questions,
       overallScore,
       flagged,
@@ -448,9 +540,14 @@ async function applyAssessmentRoleFilter(
 
   if (activeRole === "moderator") {
     const allowedModules = await fetchCurrentUserModuleCodes(userId, defaultModuleCode);
-    if (allowedModules.length === 0) return [];
+    if (allowedModules.length === 0) {
+      return assessments.filter((assessment) => assessment.id.split("::")[2] === userId);
+    }
     const allowedSet = new Set(allowedModules.map(normalizeModuleCode));
-    return assessments.filter((assessment) => allowedSet.has(normalizeModuleCode(assessment.course)));
+    return assessments.filter((assessment) => {
+      const uploadedBy = assessment.id.split("::")[2];
+      return uploadedBy === userId || allowedSet.has(normalizeModuleCode(assessment.course));
+    });
   }
 
   return assessments;
@@ -633,6 +730,47 @@ export function useModerationComments(questionIds: string[], options?: Moderatio
         return [] as DbModerationComment[];
       }
 
+      if (assessmentId) {
+        const [commentsMap, logRes] = await Promise.all([
+          fetchModerationCommentsMap(),
+          (supabase.from("activity_logs" as any) as any)
+            .select("user_id, created_at")
+            .eq("type", "moderation_complete")
+            .eq("assessment_id", assessmentId),
+        ]);
+
+        const assessmentMap = commentsMap[assessmentId] ?? {};
+        const completedAtMap = new Map<string, string>();
+        const logs = (logRes.data ?? []) as Array<{ user_id: string | null; created_at: string | null }>;
+        logs.forEach((row) => {
+          if (row.user_id && row.created_at) {
+            completedAtMap.set(row.user_id, row.created_at);
+          }
+        });
+
+        const mappedRows: DbModerationComment[] = [];
+        for (const [moderatorId, commentsByQuestion] of Object.entries(assessmentMap)) {
+          for (const questionId of questionIds) {
+            const comment = commentsByQuestion?.[questionId];
+            if (!comment || !comment.trim()) continue;
+
+            const createdAt = completedAtMap.get(moderatorId) ?? new Date().toISOString();
+            mappedRows.push({
+              id: `${assessmentId}:${moderatorId}:${questionId}`,
+              question_id: questionId,
+              user_id: moderatorId,
+              comment,
+              created_at: createdAt,
+              updated_at: createdAt,
+            });
+          }
+        }
+
+        if (mappedRows.length > 0) {
+          return mappedRows;
+        }
+      }
+
       let query = supabase
         .from("question_analysis_results")
         .select("id, question_id, similarity_reason, uploaded_by, created_at, filename, module_code")
@@ -687,17 +825,26 @@ export function useModerationComments(questionIds: string[], options?: Moderatio
 
 export function useSaveComment() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async ({ questionId, comment }: { questionId: string; comment: string }) => {
-      if (!questionId || comment === undefined) return;
+    mutationFn: async ({ assessmentId, questionId, comment }: { assessmentId: string; questionId: string; comment: string }) => {
+      if (!user || !assessmentId || !questionId || comment === undefined) return;
 
-      const { error } = await supabase
-        .from("question_analysis_results")
-        .update({ similarity_reason: comment })
-        .eq("question_id", questionId);
+      const map = await fetchModerationCommentsMap();
+      const byAssessment = map[assessmentId] ?? {};
+      const byModerator = byAssessment[user.id] ?? {};
 
-      if (error) throw error;
+      if ((comment ?? "").trim().length === 0) {
+        delete byModerator[questionId];
+      } else {
+        byModerator[questionId] = comment;
+      }
+
+      byAssessment[user.id] = byModerator;
+      map[assessmentId] = byAssessment;
+
+      await upsertModerationCommentsMap(map);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["moderation-comments"] });

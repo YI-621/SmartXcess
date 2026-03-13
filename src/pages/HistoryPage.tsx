@@ -5,8 +5,9 @@ import { QuestionCard } from "@/components/moderate/QuestionCard";
 import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, CheckCircle, Pencil, Loader2 } from "lucide-react";
-import { useAssessmentsWithQuestions, useModerationComments, useSaveComment, useUpdateAssessmentStatus, useLogActivity } from "@/hooks/useData";
+import { useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 const statusStyles: Record<string, string> = {
   Moderating: "bg-primary/10 text-primary border-primary/20",
@@ -18,8 +19,8 @@ const statusStyles: Record<string, string> = {
 
 const HistoryPage = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
   const { data: dbAssessments, isLoading } = useAssessmentsWithQuestions();
-  const updateStatus = useUpdateAssessmentStatus();
   const logActivity = useLogActivity();
   const saveComment = useSaveComment();
 
@@ -40,27 +41,31 @@ const HistoryPage = () => {
 
   const selected = allItems.find((a) => a.id === selectedId);
   const questionIds = selected?.questions.map((q) => q.id) ?? [];
-  const { data: dbComments } = useModerationComments(questionIds);
+  const { data: dbComments } = useModerationComments(questionIds, {
+    assessmentId: selectedId,
+  });
 
   useEffect(() => {
     if (dbComments) {
       const map: Record<string, string> = {};
-      dbComments.forEach((c) => { map[c.question_id] = c.comment; });
+      dbComments.forEach((c) => {
+        if (user?.id && c.user_id !== user.id) return;
+        map[c.question_id] = c.comment;
+      });
       setComments((prev) => ({ ...map, ...prev }));
     }
-  }, [dbComments]);
+  }, [dbComments, user?.id]);
 
   const handleDone = async () => {
     if (selectedId && selected && !selected.isDone) {
       const publishTargets = selected.questions
-        .map((q) => ({ questionId: q.id, comment: comments[q.id] }))
+        .map((q) => ({ assessmentId: selectedId, questionId: q.id, comment: comments[q.id] }))
         .filter((item) => item.comment !== undefined);
 
       if (publishTargets.length > 0) {
         await Promise.all(publishTargets.map((item) => saveComment.mutateAsync(item)));
       }
 
-      updateStatus.mutate({ id: selectedId, status: "Done" });
       logActivity.mutate({ type: "moderation_complete", description: `${selected.title} moderation completed`, assessmentId: selectedId });
       toast({ title: "Assessment marked as done" });
       setSelectedId(null);

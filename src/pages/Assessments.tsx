@@ -241,7 +241,7 @@ const Assessments = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                {["Title", "Module", "Date", "Questions", "Score", "Status"].map((h) => (
+                {["Title", "Module", "Date", "Questions", "Moderation", "Score", "Status"].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {h}
                   </th>
@@ -274,6 +274,9 @@ const Assessments = () => {
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.course}</td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.date}</td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.questions.length}</td>
+                  <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">
+                    {a.moderationProgress ? `${a.moderationProgress.completed}/${a.moderationProgress.assigned}` : "0/0"}
+                  </td>
                   <td className="px-5 py-3.5">
                     {a.overallScore < 0 ? (
                       <span className="text-sm font-bold font-mono text-muted-foreground">--</span>

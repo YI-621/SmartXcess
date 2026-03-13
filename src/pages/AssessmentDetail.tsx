@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useEffect, useMemo, useState } from "react";
 
 const statusStyles: Record<string, string> = {
   Moderating: "bg-primary/10 text-primary border-primary/20",
@@ -55,13 +56,27 @@ const AssessmentDetail = () => {
 
   // Fetch author names and roles for all commenters
   const commenterIds = [...new Set(dbComments?.map((c) => c.user_id) ?? [])];
+  const assignedModeratorIds = assessment?.moderationProgress?.assignedModeratorIds ?? [];
+  const moderatorIds = [...new Set([...assignedModeratorIds, ...commenterIds])];
+
+  const [selectedModeratorId, setSelectedModeratorId] = useState<string>("all");
+
+  useEffect(() => {
+    if (selectedModeratorId !== "all" && moderatorIds.includes(selectedModeratorId)) return;
+    if (moderatorIds.length > 0) {
+      setSelectedModeratorId(moderatorIds[0]);
+      return;
+    }
+    setSelectedModeratorId("all");
+  }, [moderatorIds, selectedModeratorId]);
+
   const { data: commenterProfiles } = useQuery({
-    queryKey: ["commenter-profiles", commenterIds],
-    enabled: commenterIds.length > 0,
+    queryKey: ["commenter-profiles", moderatorIds],
+    enabled: moderatorIds.length > 0,
     queryFn: async () => {
       const [profilesRes, rolesRes] = await Promise.all([
-        supabase.from("profiles").select("user_id, full_name").in("user_id", commenterIds),
-        supabase.from("user_roles").select("user_id, role").in("user_id", commenterIds),
+        supabase.from("profiles").select("user_id, full_name").in("user_id", moderatorIds),
+        supabase.from("user_roles").select("user_id, role").in("user_id", moderatorIds),
       ]);
       const profileMap = new Map((profilesRes.data ?? []).map((p: any) => [p.user_id, p.full_name ?? "Unknown"]));
       const roleMap = new Map((rolesRes.data ?? []).map((r: any) => [r.user_id, r.role]));
@@ -69,9 +84,18 @@ const AssessmentDetail = () => {
     },
   });
 
+  const moderatorOptions = useMemo(
+    () => moderatorIds.map((moderatorId) => ({
+      id: moderatorId,
+      name: commenterProfiles?.profileMap.get(moderatorId) ?? "Unknown",
+    })),
+    [commenterProfiles?.profileMap, moderatorIds]
+  );
+
   // Group comments by question_id with author info
   const commentsPerQuestion: Record<string, CommentWithAuthor[]> = {};
   dbComments?.forEach((c) => {
+    if (selectedModeratorId !== "all" && c.user_id !== selectedModeratorId) return;
     if (!commentsPerQuestion[c.question_id]) commentsPerQuestion[c.question_id] = [];
     commentsPerQuestion[c.question_id].push({
       id: c.id,
@@ -108,9 +132,27 @@ const AssessmentDetail = () => {
             <p className="text-sm text-muted-foreground mt-1">
               {assessment.course} · {assessment.date}
             </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Moderation progress: {assessment.moderationProgress?.completed ?? 0}/{assessment.moderationProgress?.assigned ?? 0} moderator(s) completed
+            </p>
           </div>
         </div>
       </div>
+
+      {activeRole === "lecturer" && moderatorOptions.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-3 flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">View comments from:</span>
+          <select
+            value={selectedModeratorId}
+            onChange={(e) => setSelectedModeratorId(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+          >
+            {moderatorOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
@@ -159,7 +201,9 @@ const AssessmentDetail = () => {
                       <span className="text-xs text-muted-foreground italic">
                         {activeRole === "lecturer" && assessment.status !== "Done"
                           ? "Comments will be visible after moderator marks this assessment as Done."
-                          : "No comments yet."}
+                          : activeRole === "lecturer" && selectedModeratorId !== "all"
+                            ? "No comments from this moderator yet."
+                            : "No comments yet."}
                       </span>
                     </div>
                   </div>

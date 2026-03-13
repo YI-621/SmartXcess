@@ -74,6 +74,12 @@ export interface Assessment {
   moderator?: string;
   date: string;
   status: AssessmentStatus;
+  moderationProgress?: {
+    assigned: number;
+    completed: number;
+    assignedModeratorIds: string[];
+    completedModeratorIds: string[];
+  };
   questions: Question[];
   overallScore: number;
   flagged?: boolean;
