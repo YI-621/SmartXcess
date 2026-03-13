@@ -33,6 +33,11 @@ def health() -> dict:
   return {"ok": True}
 
 
+@app.get("/")
+def root() -> dict:
+  return {"ok": True, "service": "SmartXcess Backend API"}
+
+
 @app.post("/api/moderation/analyze")
 async def analyze_assessment(
   module_code: str = Form(...),

@@ -51,13 +51,33 @@ export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
 
       <div className="grid grid-cols-2 gap-4 text-center">
         {[
-          { label: "Questions", value: assessment.questions.length },
-          { label: "Avg Complexity", value: `${avgComplexity}%` },
-          { label: "Avg Similarity", value: `${avgSimilarity}%` },
-          { label: "Bloom Levels", value: `${bloomCoverage}/6` },
-          { label: "Avg Difficulty", value: avgDifficultyLabel },
+          {
+            label: "Questions",
+            value: assessment.questions.length,
+            description: "Total number of extracted questions analyzed in this assessment.",
+          },
+          {
+            label: "Avg Complexity",
+            value: `${avgComplexity}%`,
+            description: "Average cognitive complexity score across all questions. Higher means more demanding questions.",
+          },
+          {
+            label: "Avg Similarity",
+            value: `${avgSimilarity}%`,
+            description: "Average similarity to matched question sources. Higher values indicate more overlap and higher plagiarism risk.",
+          },
+          {
+            label: "Bloom Levels",
+            value: `${bloomCoverage}/6`,
+            description: "How many Bloom taxonomy levels are covered by this paper out of 6 possible levels.",
+          },
+          {
+            label: "Avg Difficulty",
+            value: avgDifficultyLabel,
+            description: "Overall difficulty band based on all question-level difficulty ratings.",
+          },
         ].map((s) => (
-          <div key={s.label} className="rounded-lg bg-muted/50 p-3">
+          <div key={s.label} title={s.description} className="rounded-lg bg-muted/50 p-3 cursor-help">
             <p className="text-lg font-bold font-mono text-card-foreground">{s.value}</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">{s.label}</p>
           </div>

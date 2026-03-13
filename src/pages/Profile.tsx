@@ -122,12 +122,12 @@ export default function Profile() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">My Modules</CardTitle>
-          <CardDescription>Add the modules you are teaching or moderating</CardDescription>
+          <CardDescription>Enter module code only</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
             <Input
-              placeholder="e.g. CS201 - Data Structures"
+              placeholder="e.g. CSC6000"
               value={newModule}
               onChange={(e) => setNewModule(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addModule()}

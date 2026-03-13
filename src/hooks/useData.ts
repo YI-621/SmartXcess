@@ -197,6 +197,10 @@ function normalizeModuleCode(value: string | null | undefined): string {
   return (value ?? "").trim().toUpperCase();
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function parseAssessmentGroupingKey(assessmentId: string | null | undefined): {
   filename: string;
   moduleCode: string;
@@ -356,8 +360,9 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
   if (!rows || rows.length === 0) return [];
 
   const uploaderIds = [...new Set(rows.map((r) => r.uploaded_by).filter((id): id is string => !!id))];
-  const { data: profiles } = uploaderIds.length
-    ? await supabase.from("profiles").select("user_id, full_name").in("user_id", uploaderIds)
+  const uploaderProfileIds = uploaderIds.filter(isUuid);
+  const { data: profiles } = uploaderProfileIds.length
+    ? await supabase.from("profiles").select("user_id, full_name").in("user_id", uploaderProfileIds)
     : { data: [] as Array<{ user_id: string; full_name: string | null }> };
 
   const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name ?? "Unknown"]));

@@ -4,7 +4,7 @@ import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, Loader2, ArrowLeft, FileText } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useAssessmentWithQuestions, useAssessmentsWithQuestions, useModerationComments, useSaveComment, useUpdateAssessmentStatus, useLogActivity } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -43,12 +43,12 @@ const Moderate = () => {
 
   const [comments, setComments] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (dbComments) {
-      const map: Record<string, string> = {};
-      dbComments.forEach((c) => { map[c.question_id] = c.comment; });
-      setComments((prev) => ({ ...map, ...prev }));
-    }
+  const existingComments = useMemo(() => {
+    const map: Record<string, string> = {};
+    (dbComments ?? []).forEach((c) => {
+      map[c.question_id] = c.comment;
+    });
+    return map;
   }, [dbComments]);
 
   const handleCommentChange = (questionId: string, value: string) => {
@@ -163,7 +163,7 @@ const Moderate = () => {
               key={q.id}
               question={q}
               index={i}
-              comment={comments[q.id] || ""}
+              comment={isReviewed ? (existingComments[q.id] || "") : (comments[q.id] || "")}
               onCommentChange={(val) => handleCommentChange(q.id, val)}
               readOnly={isReviewed}
             />
