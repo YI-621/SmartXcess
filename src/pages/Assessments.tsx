@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { Search, Upload, Loader2 } from "lucide-react";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,9 +38,60 @@ const Assessments = () => {
   const [selectedModeratingAssessment, setSelectedModeratingAssessment] = useState<UploadPreviewAssessment | null>(null);
   const [pendingUploads, setPendingUploads] = useState<UploadPreviewAssessment[]>([]);
   const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.DEV ? "http://localhost:8000" : "");
+  const pendingStorageKey = useMemo(
+    () => (user?.id ? `smartxcess.pendingUploads:${user.id}` : null),
+    [user?.id]
+  );
 
   const { data: dbAssessments, isLoading } = useAssessmentsWithQuestions();
   const assessments: UploadPreviewAssessment[] = [...pendingUploads, ...(dbAssessments ?? [])];
+
+  useEffect(() => {
+    if (!pendingStorageKey) {
+      setPendingUploads([]);
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(pendingStorageKey);
+      if (!raw) {
+        setPendingUploads([]);
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as UploadPreviewAssessment[];
+      if (!Array.isArray(parsed)) {
+        setPendingUploads([]);
+        return;
+      }
+
+      setPendingUploads(parsed);
+    } catch {
+      setPendingUploads([]);
+    }
+  }, [pendingStorageKey]);
+
+  useEffect(() => {
+    if (!pendingStorageKey) return;
+    localStorage.setItem(pendingStorageKey, JSON.stringify(pendingUploads));
+  }, [pendingStorageKey, pendingUploads]);
+
+  useEffect(() => {
+    if (!dbAssessments || dbAssessments.length === 0) return;
+
+    setPendingUploads((prev) => {
+      const next = prev.filter((pending) => {
+        const matched = dbAssessments.some(
+          (db) =>
+            db.title.trim().toLowerCase() === pending.title.trim().toLowerCase() &&
+            db.course.trim().toUpperCase() === pending.course.trim().toUpperCase()
+        );
+        return !matched;
+      });
+
+      return next.length === prev.length ? prev : next;
+    });
+  }, [dbAssessments]);
 
   const filtered = assessments.filter(
     (a) =>
@@ -88,6 +139,7 @@ const Assessments = () => {
     ]);
 
     setUploading(true);
+    let uploadSucceeded = false;
     try {
       const formData = new FormData();
       formData.append("module_code", moduleCode.trim().toUpperCase());
@@ -104,6 +156,9 @@ const Assessments = () => {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
+        if (response.status === 502 || response.status === 504) {
+          throw new Error("Moderation request timed out on server. Please retry with a smaller PDF or try again shortly.");
+        }
         throw new Error(payload?.detail ?? payload?.reason ?? "Analysis failed");
       }
 
@@ -121,11 +176,26 @@ const Assessments = () => {
       setPdfName("");
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      uploadSucceeded = true;
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setPendingUploads((prev) =>
+        prev.map((assessment) =>
+          assessment.id === tempId
+            ? {
+                ...assessment,
+                status: "Rejected",
+                isTemporary: false,
+                flagReason: err.message,
+              }
+            : assessment
+        )
+      );
     } finally {
       setUploading(false);
-      setPendingUploads((prev) => prev.filter((assessment) => assessment.id !== tempId));
+      if (uploadSucceeded) {
+        setPendingUploads((prev) => prev.filter((assessment) => assessment.id !== tempId));
+      }
     }
   };
 
