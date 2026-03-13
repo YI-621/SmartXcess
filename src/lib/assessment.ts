@@ -44,6 +44,10 @@ export interface ModerationDetails {
   question_id?: string;
   grammar_errors?: string;
   grammar_structure?: string;
+  relevancy_to_scope?: string | number;
+  internal_similarity_score?: number;
+  external_similarity_score?: number;
+  similarity_type_used?: "internal" | "external" | "overall";
   suggestion?: string;
   validated_bloom_keywords?: string;
   raw_complexity?: string;

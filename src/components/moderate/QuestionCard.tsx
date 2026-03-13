@@ -19,6 +19,74 @@ const difficultyIndicatorSteps: Array<{ level: Question["difficulty"]; color: st
   { level: "Very Hard", color: "bg-red-500" },
 ];
 
+const relevancySteps = [
+  { label: "Very Low", color: "bg-red-500" },
+  { label: "Low", color: "bg-orange-500" },
+  { label: "Medium", color: "bg-yellow-500" },
+  { label: "High", color: "bg-green-500" },
+  { label: "Very High", color: "bg-emerald-500" },
+] as const;
+
+function normalizeRelevancy(raw: unknown): { label: string; index: number } {
+  const byIndex = (index: number): { label: string; index: number } => {
+    const clamped = Math.max(0, Math.min(4, index));
+    return { label: relevancySteps[clamped].label, index: clamped };
+  };
+
+  if (raw === null || raw === undefined) {
+    return { label: "N/A", index: -1 };
+  }
+
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    // Primary mapping: DB int8 scale (1-5 => Very Low..Very High).
+    if (raw >= 1 && raw <= 5) {
+      return byIndex(Math.round(raw) - 1);
+    }
+
+    // Secondary mapping if DB stores zero-based buckets (0-4).
+    if (raw >= 0 && raw <= 4) {
+      return byIndex(Math.round(raw));
+    }
+
+    // Fallback mapping for percentage-like values.
+    const score = Math.max(0, Math.min(100, raw));
+    if (score >= 85) return { label: "Very High", index: 4 };
+    if (score >= 65) return { label: "High", index: 3 };
+    if (score >= 40) return { label: "Medium", index: 2 };
+    if (score >= 20) return { label: "Low", index: 1 };
+    return { label: "Very Low", index: 0 };
+  }
+
+  const value = String(raw).trim();
+  if (!value || value.toLowerCase() === "n/a") {
+    return { label: "N/A", index: -1 };
+  }
+
+  const numeric = Number.parseFloat(value);
+  if (Number.isFinite(numeric)) {
+    return normalizeRelevancy(numeric);
+  }
+
+  const lowered = value.toLowerCase();
+  const pctMatch = lowered.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (pctMatch) {
+    const pct = Number.parseFloat(pctMatch[1]);
+    if (pct >= 85) return { label: "Very High", index: 4 };
+    if (pct >= 65) return { label: "High", index: 3 };
+    if (pct >= 40) return { label: "Medium", index: 2 };
+    if (pct >= 20) return { label: "Low", index: 1 };
+    return { label: "Very Low", index: 0 };
+  }
+
+  if (lowered.includes("very high") || lowered.includes("highly relevant")) return { label: "Very High", index: 4 };
+  if (lowered.includes("high") || lowered.includes("relevant")) return { label: "High", index: 3 };
+  if (lowered.includes("medium") || lowered.includes("moderate")) return { label: "Medium", index: 2 };
+  if (lowered.includes("very low") || lowered.includes("irrelevant")) return { label: "Very Low", index: 0 };
+  if (lowered.includes("low")) return { label: "Low", index: 1 };
+
+  return { label: "Medium", index: 2 };
+}
+
 function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) {
   const activeIndex = difficultyIndicatorSteps.findIndex((step) => step.level === difficulty);
 
@@ -26,6 +94,7 @@ function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) 
     <div aria-label={`Difficulty indicator: ${difficulty}`} className="space-y-1">
       <div className="flex justify-between text-[10px]">
         <span className="text-muted-foreground">Difficulty</span>
+        <span className="font-medium text-card-foreground">{difficulty}</span>
       </div>
       <div className="flex gap-1">
         {difficultyIndicatorSteps.map((step, index) => {
@@ -33,8 +102,9 @@ function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) 
           return (
             <div key={step.level} className="flex-1">
               <div
+                title={step.level}
                 className={cn(
-                  "h-2 w-full rounded-sm transition-all",
+                  "h-2 w-full rounded-sm transition-all cursor-help",
                   isActive ? step.color : "bg-muted",
                   index === activeIndex && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
                 )}
@@ -63,9 +133,13 @@ function ScoreBar({ label, value, max = 100, variant }: { label: string; value: 
 }
 
 export function QuestionCard({ question, index, comment, onCommentChange, onCommentBlur, readOnly }: QuestionCardProps) {
-  const similarityVariant = question.similarityScore > 60 ? "bad" : question.similarityScore > 30 ? "warn" : "good";
+  const similarityScore = question.similarityScore ?? 0;
+  const similarityType = question.moderationDetails?.similarity_type_used ?? "overall";
+  const similarityVariant = similarityScore > 60 ? "bad" : similarityScore > 30 ? "warn" : "good";
+  const relevancy = normalizeRelevancy(question.moderationDetails?.relevancy_to_scope);
 
   return (
+
     <div className="rounded-xl border border-border bg-card p-5 animate-fade-in hover:shadow-sm transition-shadow">
       <div className="flex items-start justify-between gap-4 mb-4">
         <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -74,13 +148,47 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
           </span>
           <p className="text-sm text-card-foreground leading-relaxed">{question.text}</p>
         </div>
-        <span className="shrink-0 text-xs font-mono font-medium text-muted-foreground">{question.marks} marks</span>
       </div>
-
 
       <div className="grid grid-cols-2 gap-3">
         <DifficultyBars difficulty={question.difficulty} />
-        <ScoreBar label="Similarity" value={question.similarityScore} variant={similarityVariant} />
+        <ScoreBar label={`Similarity (${similarityType})`} value={similarityScore} variant={similarityVariant} />
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div aria-label={`Relevancy to scope indicator: ${relevancy.label}`} className="space-y-1">
+          <div className="flex justify-between text-[10px]">
+            <span className="text-muted-foreground">Relevancy to Scope</span>
+            <span className="font-medium text-card-foreground">{relevancy.label}</span>
+          </div>
+          <div className="flex gap-1">
+            {relevancySteps.map((step, idx) => {
+              const isActive = idx <= relevancy.index;
+              return (
+                <div key={step.label} className="flex-1">
+                  <div
+                    title={step.label}
+                    className={cn(
+                      "h-2 w-full rounded-sm transition-all cursor-help",
+                      isActive ? step.color : "bg-muted",
+                      idx === relevancy.index && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
+                    )}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
+          <div className="text-[10px] mb-2 text-muted-foreground">Bloom Analysis</div>
+          <div className="flex items-end justify-between gap-3 min-h-[28px]">
+            <span className="text-[12px] font-medium text-card-foreground">{question.bloomLevel}</span>
+            <span className="text-[11px] text-card-foreground text-right">
+              {question.keywords.length > 0 ? question.keywords.join(", ") : "No validated keywords"}
+            </span>
+          </div>
+        </div>
       </div>
 
       {question.complexity < 30 && (

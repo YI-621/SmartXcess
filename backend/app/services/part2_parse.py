@@ -4,8 +4,8 @@ import json
 # ==============================
 # REGEX PATTERNS
 # ==============================
-# Main Q supports Q1, QI, QL
-MAIN_Q_RE = re.compile(r'^Q[0-9IVXLCDM]+', re.I)
+# Main Q supports Q1, QI, QL and QUESTION 1 styles.
+MAIN_Q_RE = re.compile(r'^(?:Q(?:UESTION)?\s*)([0-9IVXLCDM]+)\.?\s*(.*)$', re.I)
 
 # Letter excludes roman letters
 LETTER_RE = re.compile(r'^\(([a-hj-z])\)', re.I)
@@ -31,6 +31,7 @@ def parse_exam(text, paper_id=""):
     result = {}
 
     current_q = None
+    current_q_intro = ""
     current_letter = None
     letter_intro = ""
     letter_has_roman = False
@@ -40,6 +41,15 @@ def parse_exam(text, paper_id=""):
 
     # Generate prefix like "2014_APR_" if a paper_id is provided
     prefix = f"{paper_id}_" if paper_id else ""
+
+    def build_q_label(token: str) -> str:
+        return f"Q{token.upper()}"
+
+    def save_top_level():
+        if current_q and not current_letter:
+            cleaned = clean(current_q_intro)
+            if cleaned:
+                result[f"{prefix}{current_q}"] = cleaned
 
     def save_letter():
         if current_q and current_letter and not letter_has_roman:
@@ -57,13 +67,17 @@ def parse_exam(text, paper_id=""):
             continue
 
         # MAIN Q
-        if MAIN_Q_RE.match(line):
+        m = MAIN_Q_RE.match(line)
+        if m:
             if current_roman:
                 save_roman()
-            else:
+            elif current_letter:
                 save_letter()
+            else:
+                save_top_level()
 
-            current_q = MAIN_Q_RE.match(line).group().upper()
+            current_q = build_q_label(m.group(1))
+            current_q_intro = m.group(2).strip()
             current_letter = None
             letter_intro = ""
             letter_has_roman = False
@@ -80,7 +94,11 @@ def parse_exam(text, paper_id=""):
                 save_letter()
 
             current_letter = m.group(1).lower()
-            letter_intro = line[m.end():].strip()
+            line_intro = line[m.end():].strip()
+            if current_q_intro:
+                letter_intro = f"{current_q_intro} {line_intro}".strip()
+            else:
+                letter_intro = line_intro
             letter_has_roman = False
             current_roman = None
             roman_text = ""
@@ -102,12 +120,16 @@ def parse_exam(text, paper_id=""):
             roman_text += " " + line
         elif current_letter:
             letter_intro += " " + line
+        elif current_q:
+            current_q_intro += " " + line
 
     # FINAL SAVE
     if current_roman:
         save_roman()
-    else:
+    elif current_letter:
         save_letter()
+    else:
+        save_top_level()
 
     return result
 

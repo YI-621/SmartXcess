@@ -266,7 +266,7 @@ const Assessments = () => {
                     }
 
                     if (!a.isTemporary) {
-                      navigate(`/assessment-detail?id=${a.id}`);
+                      navigate(`/assessment-detail/${encodeURIComponent(a.id)}`);
                     }
                   }}
                 >

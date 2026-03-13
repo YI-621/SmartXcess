@@ -6,10 +6,32 @@ interface AssessmentSummaryProps {
 }
 
 export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
-  const totalMarks = assessment.questions.reduce((s, q) => s + q.marks, 0);
   const avgComplexity = Math.round(assessment.questions.reduce((s, q) => s + q.complexity, 0) / assessment.questions.length);
   const avgSimilarity = Math.round(assessment.questions.reduce((s, q) => s + q.similarityScore, 0) / assessment.questions.length);
   const bloomCoverage = new Set(assessment.questions.map((q) => q.bloomLevel)).size;
+
+  const difficultyScoreMap = {
+    "Very Easy": 1,
+    Easy: 2,
+    Medium: 3,
+    Hard: 4,
+    "Very Hard": 5,
+  } as const;
+
+  const avgDifficultyScore = assessment.questions.length
+    ? assessment.questions.reduce((sum, q) => sum + difficultyScoreMap[q.difficulty], 0) / assessment.questions.length
+    : 3;
+
+  const avgDifficultyLabel =
+    avgDifficultyScore < 1.5
+      ? "Very Easy"
+      : avgDifficultyScore < 2.5
+        ? "Easy"
+        : avgDifficultyScore < 3.5
+          ? "Medium"
+          : avgDifficultyScore < 4.5
+            ? "Hard"
+            : "Very Hard";
 
   const scoreColor = assessment.overallScore >= 70 ? "text-success" : assessment.overallScore >= 50 ? "text-warning" : "text-destructive";
 
@@ -30,11 +52,10 @@ export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
       <div className="grid grid-cols-2 gap-4 text-center">
         {[
           { label: "Questions", value: assessment.questions.length },
-          { label: "Total Marks", value: totalMarks },
           { label: "Avg Complexity", value: `${avgComplexity}%` },
           { label: "Avg Similarity", value: `${avgSimilarity}%` },
           { label: "Bloom Levels", value: `${bloomCoverage}/6` },
-          { label: "Difficulty Mix", value: `${new Set(assessment.questions.map((q) => q.difficulty)).size}/5` },
+          { label: "Avg Difficulty", value: avgDifficultyLabel },
         ].map((s) => (
           <div key={s.label} className="rounded-lg bg-muted/50 p-3">
             <p className="text-lg font-bold font-mono text-card-foreground">{s.value}</p>

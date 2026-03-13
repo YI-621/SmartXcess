@@ -2,6 +2,7 @@ import os
 import time
 import re
 import copy
+import math
 from pathlib import Path
 from supabase import create_client, Client
 from sentence_transformers import SentenceTransformer
@@ -287,31 +288,80 @@ def get_comprehensive_analysis(question_text, potential_bloom, module):
     keywords_str = ", ".join([f"'{k}' ({'/'.join(v)})" for k, v in potential_bloom.items()]) if potential_bloom else "None"
     try:
         completion = groq_bloom_client.chat.completions.create(
-            model="openai/gpt-oss-120b", # Kept your friend's exact model choice
+            model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": f"You are an educational quality auditor for the module: {module}.\nAnalyze the question and strictly return the following fields. Do not include any introductory or concluding remarks."},
-                {"role": "user", "content": f"Question: \"{question_text}\"\nPotential Bloom Keywords Found: {keywords_str}\n\nReturn exactly in this format:\nDifficulty: [Very Easy/Easy/Medium/Hard/Very Hard]\nValidated Bloom Keywords: [Keywords from list filtered according to rules: Select the instructional verb that directs the student’s task. Bloom keywords usually appears at the beginning of the question. Ignore verbs that describe concepts, processes, or objects in the question.Ignore verbs inside explanatory phrases or subordinate clauses.]\nFinal Bloom Level: [Level Name]\nGrammar spelling error: [List errors or None]\nGrammar Structure suggestion: [Grammar structure suggestion]\nRelevancy to Module Scope: [Yes/No]\nGrammar Suggestion: [Revised question]"}
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are an educational quality auditor for the module: {module}.\n"
+                        "Analyze the question and strictly return the requested fields. "
+                        "Do not include any introductory or concluding remarks."
+                        "There will be no Bloom Levels if no validated Bloom Keywords"
+                        "If there are two or more validated Bloom Keywords that belong to different levels, assign the higher level as the Final Bloom Level. "
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Question: \"{question_text}\"\n"
+                        f"Potential Bloom Keywords Found: {keywords_str}\n\n"
+                        "Return exactly in this format:\n"
+                        "Complexity (Difficulty): [Very Easy/Easy/Medium/Hard/Very Hard]\n"
+                        "Reason of Complexity: [Explain why this difficulty level was assigned based on the cognitive effort required]\n"
+                        "Validated Bloom Keywords: [Keywords from list filtered according to rules: Select the instructional verb that directs the student’s task.Ignore verbs inside explanatory phrases or subordinate clauses.Ignore verbs that describe concepts, processes, or objects in the question.]\n"
+                        "Final Bloom Level: [Knowledge/Comprehension/Application/Analysis/Synthesis/Evaluation]\n"
+                        "Grammar spelling error: [List errors or None]\n"
+                        "Grammar Structure: [Analysis of sentence structure]\n"
+                        "Relevancy to Module Scope: [Rate in 1-5]\n"
+                        "Suggestion: [Suggest how to improve the question without changing its meaning, especially if no bloom keywords were validated]"
+                    )
+                }
             ],
             temperature=0.1
         )
         response_text = completion.choices[0].message.content
         
         analysis = {
-            "difficulty": "Medium", "validated_bloom_keywords": "None", "final_bloom_level": "Unclassified",
+            "difficulty": "Medium", "difficulty_reason": "N/A", "validated_bloom_keywords": "None", "final_bloom_level": "Unclassified",
             "grammar_errors": "N/A", "grammar_structure": "N/A", "relevancy_to_scope": "N/A", "suggestion": "N/A"
         }
         
         patterns = {
-            "difficulty": r"Difficulty:\s*(.*)", "validated_bloom_keywords": r"Validated Bloom Keywords:\s*(.*)",
-            "final_bloom_level": r"Final Bloom Level:\s*(.*)", "grammar_errors": r"Grammar spelling error:\s*(.*)",
-            "grammar_structure": r"Grammar Structure:\s*(.*)", "relevancy_to_scope": r"Relevancy to Module Scope:\s*(.*)",
-            "suggestion": r"Grammar Suggestion:\s*(.*)"
+            "difficulty": [
+                r"^\s*(?:Complexity\s*\(\s*Difficulty\s*\)|Difficulty)\s*:\s*(.+)$",
+            ],
+            "difficulty_reason": [
+                r"^\s*Reason\s+of\s+Complexity\s*:\s*(.+)$",
+                r"^\s*Reason\s+of\s+Difficulty\s*:\s*(.+)$",
+                r"^\s*Reason\s+of\s+Diffculty\s*:\s*(.+)$",
+            ],
+            "validated_bloom_keywords": [
+                r"^\s*Validated\s+Bloom\s+Keywords\s*:\s*(.+)$",
+            ],
+            "final_bloom_level": [
+                r"^\s*Final\s+Bloom\s+Level\s*:\s*(.+)$",
+            ],
+            "grammar_errors": [
+                r"^\s*Grammar\s+spelling\s+error\s*:\s*(.+)$",
+            ],
+            "grammar_structure": [
+                r"^\s*Grammar\s+Structure\s*:\s*(.+)$",
+            ],
+            "relevancy_to_scope": [
+                r"^\s*Relevancy\s+to\s+Module\s+Scope\s*:\s*(.+)$",
+            ],
+            "suggestion": [
+                r"^\s*Suggestion\s*:\s*(.+)$",
+                r"^\s*Grammar\s+Suggestion\s*:\s*(.+)$",
+            ],
         }
 
-        for key, pattern in patterns.items():
-            match = re.search(pattern, response_text, re.IGNORECASE)
-            if match:
-                analysis[key] = match.group(1).strip().replace("**", "") 
+        for key, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                match = re.search(pattern, response_text, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    analysis[key] = match.group(1).strip().replace("**", "")
+                    break
         return analysis
     except Exception as e:
         return {"error": str(e), "final_bloom_level": "Error"}
@@ -320,12 +370,80 @@ def get_comprehensive_analysis(question_text, potential_bloom, module):
 # 4. YOUR ENGINE: SIMILARITY CHECK SECTION
 # =========================================================
 def check_internal(query_vector, target_module):
+    target_module = (target_module or "").strip().upper()
+
+    def _to_float_list(value):
+        if isinstance(value, list):
+            try:
+                return [float(x) for x in value]
+            except Exception:
+                return None
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("[") and text.endswith("]"):
+                try:
+                    parts = [p.strip() for p in text[1:-1].split(",") if p.strip()]
+                    return [float(p) for p in parts]
+                except Exception:
+                    return None
+        return None
+
+    def _cosine(a, b):
+        if not a or not b or len(a) != len(b):
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(y * y for y in b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    normalized_query = _to_float_list(query_vector)
+    if not normalized_query:
+        return []
+
+    # Preferred path: RPC if available in deployed DB.
     try:
         response = supabase.rpc('match_questions', {
-            'query_embedding': query_vector, 'match_threshold': 0.6, 'match_count': 1, 'target_module': target_module 
+            'query_embedding': normalized_query, 'match_threshold': 0.6, 'match_count': 1, 'target_module': target_module
         }).execute()
-        return response.data
+        if response.data:
+            return response.data
     except Exception as e:
+        print(f"⚠ RPC match_questions unavailable/failed, using table fallback: {e}")
+
+    # Fallback path: table scan with local cosine for environments missing RPC.
+    try:
+        rows_response = (
+            supabase
+            .table("internal_questions")
+            .select("question_id,module_code,embedding")
+            .eq("module_code", target_module)
+            .limit(500)
+            .execute()
+        )
+        rows = rows_response.data or []
+        if not rows:
+            return []
+
+        best = None
+        for row in rows:
+            embedding = _to_float_list(row.get("embedding"))
+            if not embedding:
+                continue
+            sim = _cosine(normalized_query, embedding)
+            if best is None or sim > best["similarity"]:
+                best = {
+                    "question_id": row.get("question_id", "unknown"),
+                    "module_code": row.get("module_code", target_module),
+                    "similarity": float(sim),
+                }
+
+        if not best or best["similarity"] < 0.6:
+            return []
+        return [best]
+    except Exception as e:
+        print(f"❌ Internal similarity fallback failed: {e}")
         return []
 
 def check_external(test_text):
@@ -415,7 +533,8 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
     bloom_patterns = compile_keyword_patterns(bloom_dict)
 
     total_paper_words = 0
-    total_plagiarized_words = 0
+    total_internal_plagiarized_words = 0
+    total_external_plagiarized_words = 0
     all_questions_data = []
 
     for q_id, q_text in exam_data.items():
@@ -457,7 +576,9 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
         else:
             final_source, final_reason = external_source, external_reason
             
-        total_plagiarized_words += words_in_question * (final_sim_score / 100)
+        # Accumulate internal and external plagiarized words separately
+        total_internal_plagiarized_words += words_in_question * (internal_score / 100)
+        total_external_plagiarized_words += words_in_question * (external_score / 100)
 
         # --- Engine 2 Logic ---
         potential_bloom = pre_scan_bloom(q_text, bloom_dict, bloom_patterns)
@@ -468,16 +589,19 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
             "module_code": target_module,
             "filename": source_filename,
             "uploaded_by": user_name,
-            "question_id": final_q_id, 
+            "question_id": final_q_id,
             "question_text": q_text,
             "word_count": words_in_question,
-            "similarity_score": final_sim_score,
+            "internal_similarity_score": internal_score,
+            "external_similarity_score": external_score,
+            "final_sim_score": final_sim_score,
             "similarity_source": final_source,
             "similarity_reason": final_reason,
             "regex_detected_potential": str(potential_bloom) if potential_bloom else "N/A",
             "validated_bloom_keywords": llm_info.get("validated_bloom_keywords", "None"),
             "final_bloom_level": llm_info.get("final_bloom_level", "Unclassified"),
             "difficulty": normalize_difficulty(llm_info.get("difficulty", "Medium")),
+            "difficulty_reason": llm_info.get("difficulty_reason", "N/A"),
             "grammar_spelling_error": llm_info.get("grammar_errors", "N/A"),
             "grammar_structure": llm_info.get("grammar_structure", "N/A"),
             "relevancy_to_scope": llm_info.get("relevancy_to_scope", "N/A"),
@@ -492,11 +616,14 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
     # ==========================================
     print("\n" + "=" * 80)
     if total_paper_words > 0:
-        overall_score = (total_plagiarized_words / total_paper_words) * 100
+        overall_internal = (total_internal_plagiarized_words / total_paper_words) * 100
+        overall_external = (total_external_plagiarized_words / total_paper_words) * 100
+        overall_score = max(overall_internal, overall_external)
         
         for item in all_questions_data:
-            item["overall_similarity"] = round(overall_score, 1)
-            
+            item["overall_internal_similarity"] = round(overall_internal, 1)
+            item["overall_external_similarity"] = round(overall_external, 1)
+        
         print("   💾 Saving all results to Supabase...")
         try:
             rows_to_insert = copy.deepcopy(all_questions_data)
@@ -607,7 +734,7 @@ def process_and_save_internal_questions(
         # If Supabase schema lags behind the code, remove unknown columns and retry.
         while True:
             try:
-                supabase.table("exam_questions").insert(candidate_rows).execute()
+                supabase.table("internal_questions").insert(candidate_rows).execute()
                 break
             except Exception as insert_error:
                 error_text = str(insert_error)
@@ -616,7 +743,7 @@ def process_and_save_internal_questions(
                     raise
 
                 missing_col = missing_col_match.group(1)
-                print(f"   ⚠ Schema mismatch on exam_questions: dropping column '{missing_col}' and retrying...")
+                print(f"   ⚠ Schema mismatch on internal_questions: dropping column '{missing_col}' and retrying...")
                 for row in candidate_rows:
                     row.pop(missing_col, None)
 

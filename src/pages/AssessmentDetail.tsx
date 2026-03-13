@@ -1,4 +1,4 @@
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, useParams } from "react-router-dom";
 import { QuestionCard } from "@/components/moderate/QuestionCard";
 import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 const statusStyles: Record<string, string> = {
   Moderating: "bg-primary/10 text-primary border-primary/20",
@@ -29,13 +30,28 @@ interface CommentWithAuthor {
 const AssessmentDetail = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const id = searchParams.get("id");
+  const params = useParams();
+  const rawId = params.id ?? searchParams.get("id");
+  const id = rawId
+    ? (() => {
+        try {
+          return decodeURIComponent(rawId);
+        } catch {
+          return rawId;
+        }
+      })()
+    : null;
+  const { activeRole } = useAuth();
 
   const { data: dbAssessment, isLoading } = useAssessmentWithQuestions(id);
   const assessment = dbAssessment;
 
   const questionIds = assessment?.questions.map((q) => q.id) ?? [];
-  const { data: dbComments } = useModerationComments(questionIds);
+  const { data: dbComments } = useModerationComments(questionIds, {
+    assessmentId: id,
+    hideUntilDoneForLecturer: activeRole === "lecturer",
+    assessmentStatus: assessment?.status ?? null,
+  });
 
   // Fetch author names and roles for all commenters
   const commenterIds = [...new Set(dbComments?.map((c) => c.user_id) ?? [])];
@@ -140,7 +156,11 @@ const AssessmentDetail = () => {
                   <div className="rounded-b-xl border border-t-0 border-border bg-muted/20 px-5 py-3">
                     <div className="flex items-center gap-2">
                       <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground italic">No comments yet.</span>
+                      <span className="text-xs text-muted-foreground italic">
+                        {activeRole === "lecturer" && assessment.status !== "Done"
+                          ? "Comments will be visible after moderator marks this assessment as Done."
+                          : "No comments yet."}
+                      </span>
                     </div>
                   </div>
                 )}

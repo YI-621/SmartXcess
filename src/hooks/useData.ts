@@ -70,6 +70,12 @@ export interface DbUserModule {
   created_at: string;
 }
 
+interface ModerationCommentOptions {
+  assessmentId?: string | null;
+  hideUntilDoneForLecturer?: boolean;
+  assessmentStatus?: string | null;
+}
+
 type DbQuestionAnalysisRow = Tables<"question_analysis_results">;
 
 interface ModerationThresholds {
@@ -191,6 +197,23 @@ function normalizeModuleCode(value: string | null | undefined): string {
   return (value ?? "").trim().toUpperCase();
 }
 
+function parseAssessmentGroupingKey(assessmentId: string | null | undefined): {
+  filename: string;
+  moduleCode: string;
+  uploadedBy: string;
+  dateBucket: string;
+} | null {
+  if (!assessmentId) return null;
+
+  const parts = assessmentId.split("::");
+  if (parts.length !== 4) return null;
+
+  const [filename, moduleCode, uploadedBy, dateBucket] = parts;
+  if (!filename || !moduleCode || !uploadedBy || !dateBucket) return null;
+
+  return { filename, moduleCode, uploadedBy, dateBucket };
+}
+
 async function fetchModerationThresholds(): Promise<ModerationThresholds> {
   const defaults: ModerationThresholds = {
     similarityThreshold: 75,
@@ -279,7 +302,20 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
   const normalizedDifficulty = normalizeDifficulty(dbDifficulty ?? row.complexity);
   const parsedComplexity = parseComplexity(row.complexity);
   const complexity = parsedComplexity ?? complexityFallbackByDifficulty[normalizedDifficulty];
-  const similarity = toPercent(row.similarity_score ?? row.overall_similarity ?? 0);
+  const internalSimilarity = Number((row as any).internal_similarity_score);
+  const externalSimilarity = Number((row as any).external_similarity_score);
+  const finalSimilarity = Number((row as any).final_sim_score);
+
+  const similarity = toPercent(
+    Number.isFinite(finalSimilarity)
+      ? finalSimilarity
+      : row.similarity_score ?? row.overall_similarity ?? 0
+  );
+
+  const similarityType: "internal" | "external" | "overall" =
+    Number.isFinite(internalSimilarity) && Number.isFinite(externalSimilarity)
+      ? (internalSimilarity >= externalSimilarity ? "internal" : "external")
+      : "overall";
 
   return {
     id: row.question_id ?? row.id,
@@ -295,6 +331,10 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
       question_id: row.question_id ?? undefined,
       grammar_errors: row.grammar_spelling_error ?? undefined,
       grammar_structure: row.grammar_structure ?? undefined,
+      relevancy_to_scope: row.relevancy_to_scope ?? undefined,
+      internal_similarity_score: Number.isFinite(internalSimilarity) ? toPercent(internalSimilarity) : undefined,
+      external_similarity_score: Number.isFinite(externalSimilarity) ? toPercent(externalSimilarity) : undefined,
+      similarity_type_used: similarityType,
       suggestion: row.suggestion ?? undefined,
       validated_bloom_keywords: row.validated_bloom_keywords ?? undefined,
       raw_complexity: row.complexity ?? undefined,
@@ -479,6 +519,32 @@ export function useAssessmentWithQuestions(id: string | null) {
   const { user, activeRole } = useAuth();
   const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
+  const toIdCandidates = (rawId: string): string[] => {
+    const out = new Set<string>();
+    const trimmed = rawId.trim();
+    if (!trimmed) return [];
+
+    out.add(trimmed);
+
+    try {
+      out.add(decodeURIComponent(trimmed));
+    } catch {
+      // Keep raw value if decode fails due malformed encoding.
+    }
+
+    try {
+      out.add(encodeURIComponent(trimmed));
+    } catch {
+      // Keep raw value if encode fails.
+    }
+
+    // Query strings may convert '+' to space in some flows.
+    out.add(trimmed.replace(/\+/g, " "));
+    out.add(trimmed.replace(/ /g, "+"));
+
+    return [...out].filter(Boolean);
+  };
+
   return useQuery({
     queryKey: ["assessment", id, activeRole, user?.id, defaultModuleCode],
     enabled: !!id,
@@ -489,7 +555,9 @@ export function useAssessmentWithQuestions(id: string | null) {
         activeRole,
         defaultModuleCode
       );
-      return assessments.find((a) => a.id === id!) ?? null;
+
+      const candidates = toIdCandidates(id!);
+      return assessments.find((a) => candidates.includes(a.id)) ?? null;
     },
   });
 }
@@ -545,27 +613,68 @@ export function useQuestions(assessmentId: string | null) {
   });
 }
 
-export function useModerationComments(questionIds: string[]) {
+export function useModerationComments(questionIds: string[], options?: ModerationCommentOptions) {
+  const {
+    assessmentId,
+    hideUntilDoneForLecturer = false,
+    assessmentStatus,
+  } = options ?? {};
+
   return useQuery({
-    queryKey: ["moderation-comments", questionIds],
+    queryKey: ["moderation-comments", questionIds, assessmentId, hideUntilDoneForLecturer, assessmentStatus],
     enabled: questionIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
+      if (hideUntilDoneForLecturer && assessmentStatus !== "Done") {
+        return [] as DbModerationComment[];
+      }
+
+      let query = supabase
         .from("question_analysis_results")
-        .select("id, question_id, similarity_reason, uploaded_by, created_at")
+        .select("id, question_id, similarity_reason, uploaded_by, created_at, filename, module_code")
         .in("question_id", questionIds);
 
+      const groupingKey = parseAssessmentGroupingKey(assessmentId);
+      if (groupingKey) {
+        const start = `${groupingKey.dateBucket}T00:00:00`;
+        const end = `${groupingKey.dateBucket}T23:59:59.999`;
+        query = query
+          .eq("filename", groupingKey.filename)
+          .eq("module_code", groupingKey.moduleCode)
+          .eq("uploaded_by", groupingKey.uploadedBy)
+          .gte("created_at", start)
+          .lte("created_at", end);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
+
+      let moderatorId: string | null = null;
+      let moderatorCommentAt: string | null = null;
+
+      if (assessmentId) {
+        const { data: logs, error: logError } = await (supabase.from("activity_logs" as any) as any)
+          .select("user_id, created_at")
+          .eq("type", "moderation_complete")
+          .eq("assessment_id", assessmentId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (!logError && logs && logs.length > 0) {
+          moderatorId = logs[0].user_id ?? null;
+          moderatorCommentAt = logs[0].created_at ?? null;
+        }
+      }
 
       return (data ?? [])
         .filter((row) => (row.similarity_reason ?? "").trim().length > 0)
         .map((row) => ({
           id: row.id,
           question_id: row.question_id ?? row.id,
-          user_id: row.uploaded_by ?? "unknown",
+          user_id: moderatorId ?? row.uploaded_by ?? "unknown",
           comment: row.similarity_reason ?? "",
-          created_at: row.created_at ?? new Date().toISOString(),
-          updated_at: row.created_at ?? new Date().toISOString(),
+          created_at: moderatorCommentAt ?? row.created_at ?? new Date().toISOString(),
+          updated_at: moderatorCommentAt ?? row.created_at ?? new Date().toISOString(),
         })) as DbModerationComment[];
     },
   });

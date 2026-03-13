@@ -98,7 +98,7 @@ const AdminAssessments = () => {
                 <tr
                   key={a.id}
                   className="hover:bg-muted/30 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/assessment-detail?id=${a.id}`)}
+                  onClick={() => navigate(`/assessment-detail/${encodeURIComponent(a.id)}`)}
                 >
                   <td className="px-5 py-3.5 text-sm font-medium text-card-foreground">{a.title}</td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground font-mono">{a.course}</td>

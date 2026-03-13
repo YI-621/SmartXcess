@@ -478,7 +478,7 @@ export default function Admin() {
                         <TableCell className="font-mono">{assessment.overallScore}%</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{assessment.flagReason ?? "Major moderation issue detected"}</TableCell>
                         <TableCell>
-                          <Button size="sm" variant="outline" onClick={() => navigate(`/assessment-detail?id=${assessment.id}`)}>
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/assessment-detail/${encodeURIComponent(assessment.id)}`)}>
                             View
                           </Button>
                         </TableCell>

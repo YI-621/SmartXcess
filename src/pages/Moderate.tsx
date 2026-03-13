@@ -34,7 +34,9 @@ const Moderate = () => {
   const assessment = dbAssessment;
 
   const questionIds = assessment?.questions.map((q) => q.id) ?? [];
-  const { data: dbComments } = useModerationComments(questionIds);
+  const { data: dbComments } = useModerationComments(questionIds, {
+    assessmentId: id,
+  });
   const saveComment = useSaveComment();
   const updateStatus = useUpdateAssessmentStatus();
   const logActivity = useLogActivity();

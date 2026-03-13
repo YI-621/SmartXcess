@@ -7,13 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="SmartXcess Backend API")
 
-raw_allowed_origins = os.getenv("ALLOWED_ORIGINS", "")
+raw_allowed_origins = os.getenv(
+  "ALLOWED_ORIGINS",
+  "https://yi-621.github.io,http://localhost:8080,http://localhost:5173",
+)
 if raw_allowed_origins.strip():
-  allowed_origins = [origin.strip() for origin in raw_allowed_origins.split(",") if origin.strip()]
+  allowed_origins = [origin.strip().rstrip("/") for origin in raw_allowed_origins.split(",") if origin.strip()]
 else:
   allowed_origins = [
-    "http://localhost:5173",
     "http://localhost:8080",
+    "http://localhost:5173",
   ]
 
 app.add_middleware(
@@ -38,7 +41,7 @@ async def analyze_assessment(
   file: UploadFile = File(...),
 ) -> dict:
   try:
-    from app.services.master_analyzer import process_and_save_exam
+    from .services.master_analyzer import process_and_save_exam
   except Exception as import_error:
     raise HTTPException(status_code=500, detail=f"Analyzer initialization failed: {import_error}") from import_error
 
@@ -79,7 +82,7 @@ async def upload_internal_questions(
   file: UploadFile = File(...),
 ) -> dict:
   try:
-    from app.services.master_analyzer import process_and_save_internal_questions
+    from .services.master_analyzer import process_and_save_internal_questions
   except Exception as import_error:
     raise HTTPException(status_code=500, detail=f"Analyzer initialization failed: {import_error}") from import_error
 
