@@ -199,8 +199,8 @@ export default function Auth() {
         const normalizedMessage = error.message.toLowerCase();
         if (normalizedMessage.includes("invalid login credentials")) {
           toast({
-            title: "Unregistered user",
-            description: "No account found for this email. Please sign up first.",
+            title: "Password incorrect",
+            description: "The password you entered is incorrect. Please try again.",
             variant: "destructive",
           });
         } else {
