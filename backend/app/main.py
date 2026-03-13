@@ -82,7 +82,9 @@ def _get_loaded_analyzers() -> tuple:
 
 @app.on_event("startup")
 def warm_analyzer() -> None:
-  _ensure_analyzer_loading()
+  preload_enabled = os.getenv("ANALYZER_PRELOAD_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes", "on"}
+  if preload_enabled:
+    _ensure_analyzer_loading()
 
 
 @app.get("/health")

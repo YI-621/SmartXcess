@@ -900,6 +900,7 @@ export function useUpdateAssessmentStatus() {
 
 export function useActivityLogs() {
   const { user, activeRole } = useAuth();
+  const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
     queryKey: ["activity-logs", activeRole, user?.id],
@@ -913,15 +914,34 @@ export function useActivityLogs() {
         .limit(30);
 
       if (activeRole === "admin") {
-        const { data: supervisedRoles, error: roleError } = await (supabase.from("user_roles") as any)
-          .select("user_id, role")
-          .in("role", ["lecturer", "moderator"]);
+        const adminModuleCodes = await fetchCurrentUserModuleCodes(user.id, defaultModuleCode);
+        if (adminModuleCodes.length === 0) return [] as DbActivityLog[];
+
+        const adminModuleSet = new Set(adminModuleCodes.map(normalizeModuleCode));
+
+        const [userModuleMap, roleRes] = await Promise.all([
+          fetchUserModuleMap(),
+          (supabase.from("user_roles") as any)
+            .select("user_id, role")
+            .in("role", ["lecturer", "moderator"]),
+        ]);
+
+        const { data: supervisedRoles, error: roleError } = roleRes;
 
         if (roleError) throw roleError;
 
+        const roleUserIds = new Set(
+          ((supervisedRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
+        );
+
         const supervisedUserIds = [
           ...new Set(
-            ((supervisedRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
+            Object.entries(userModuleMap)
+              .filter(([mappedUserId, modules]) => {
+                if (!roleUserIds.has(mappedUserId)) return false;
+                return modules.some((moduleCode) => adminModuleSet.has(normalizeModuleCode(moduleCode)));
+              })
+              .map(([mappedUserId]) => mappedUserId)
           ),
         ] as string[];
 
