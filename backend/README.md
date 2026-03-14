@@ -7,10 +7,10 @@ This backend wraps your existing analyzer modules:
 
 ## Environment variables
 
-Create `backend/.env` from `backend/.env.example` and fill in the values:
+Create `backend/.env` from `backend/env.example` and fill in the values:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item env.example .env
 ```
 
 Required keys:
