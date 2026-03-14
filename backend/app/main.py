@@ -1,21 +1,19 @@
 import os
 import tempfile
 from pathlib import Path
-from threading import Lock, Thread
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="SmartXcess Backend API")
 
-raw_allowed_origins = os.getenv(
-  "ALLOWED_ORIGINS",
-  "https://yi-621.github.io,http://localhost:8080,http://localhost:5173",
-)
+raw_allowed_origins = os.getenv("ALLOWED_ORIGINS", "")
 if raw_allowed_origins.strip():
+  # Normalize to plain origins (no trailing slash) because CORS origin matching is exact.
   allowed_origins = [origin.strip().rstrip("/") for origin in raw_allowed_origins.split(",") if origin.strip()]
 else:
   allowed_origins = [
+    "https://yi-621.github.io",
     "http://localhost:8080",
     "http://localhost:5173",
   ]
@@ -29,71 +27,9 @@ app.add_middleware(
 )
 
 
-_analyzer_lock = Lock()
-_analyzer_loading = False
-_analyzer_ready = False
-_analyzer_error: str | None = None
-_process_and_save_exam = None
-_process_and_save_internal_questions = None
-
-
-def _load_analyzer_once() -> None:
-  global _analyzer_loading, _analyzer_ready, _analyzer_error
-  global _process_and_save_exam, _process_and_save_internal_questions
-
-  try:
-    from .services.master_analyzer import process_and_save_exam, process_and_save_internal_questions
-
-    _process_and_save_exam = process_and_save_exam
-    _process_and_save_internal_questions = process_and_save_internal_questions
-    _analyzer_ready = True
-    _analyzer_error = None
-  except Exception as import_error:
-    _analyzer_ready = False
-    _analyzer_error = str(import_error)
-  finally:
-    with _analyzer_lock:
-      _analyzer_loading = False
-
-
-def _ensure_analyzer_loading() -> None:
-  global _analyzer_loading
-  if _analyzer_ready:
-    return
-
-  with _analyzer_lock:
-    if _analyzer_ready or _analyzer_loading:
-      return
-    _analyzer_loading = True
-    Thread(target=_load_analyzer_once, daemon=True).start()
-
-
-def _get_loaded_analyzers() -> tuple:
-  _ensure_analyzer_loading()
-
-  if _analyzer_ready:
-    return _process_and_save_exam, _process_and_save_internal_questions
-
-  if _analyzer_error:
-    raise HTTPException(status_code=500, detail=f"Analyzer initialization failed: {_analyzer_error}")
-
-  raise HTTPException(status_code=503, detail="Analyzer is warming up. Please retry in 15-30 seconds.")
-
-
-@app.on_event("startup")
-def warm_analyzer() -> None:
-  preload_enabled = os.getenv("ANALYZER_PRELOAD_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes", "on"}
-  if preload_enabled:
-    _ensure_analyzer_loading()
-
-
 @app.get("/health")
 def health() -> dict:
-  return {
-    "ok": True,
-    "analyzer_ready": _analyzer_ready,
-    "analyzer_loading": _analyzer_loading,
-  }
+  return {"ok": True}
 
 
 @app.get("/")
@@ -108,7 +44,10 @@ async def analyze_assessment(
   pdf_name: str | None = Form(default=None),
   file: UploadFile = File(...),
 ) -> dict:
-  process_and_save_exam, _ = _get_loaded_analyzers()
+  try:
+    from app.services.master_analyzer import process_and_save_exam
+  except Exception as import_error:
+    raise HTTPException(status_code=500, detail=f"Analyzer initialization failed: {import_error}") from import_error
 
   if not file.filename or not file.filename.lower().endswith(".pdf"):
     raise HTTPException(status_code=400, detail="Only PDF files are supported")
@@ -146,7 +85,10 @@ async def upload_internal_questions(
   uploaded_by: str = Form(...),
   file: UploadFile = File(...),
 ) -> dict:
-  _, process_and_save_internal_questions = _get_loaded_analyzers()
+  try:
+    from app.services.master_analyzer import process_and_save_internal_questions
+  except Exception as import_error:
+    raise HTTPException(status_code=500, detail=f"Analyzer initialization failed: {import_error}") from import_error
 
   if not file.filename or not file.filename.lower().endswith(".pdf"):
     raise HTTPException(status_code=400, detail="Only PDF files are supported")
