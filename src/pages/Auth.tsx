@@ -194,7 +194,7 @@ export default function Auth() {
     setLoading(true);
 
     if (isLogin) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         const normalizedMessage = error.message.toLowerCase();
         if (normalizedMessage.includes("invalid login credentials")) {
@@ -208,7 +208,40 @@ export default function Auth() {
         }
         await sendAuditLog("LOGIN_FAILED", "Authentication System", email);
         setLoading(false);
-      } else {
+      } else if (authData.user) {
+        const { data: sessionData } = await supabase
+          .from("user_sessions")
+          .select("is_logged_in, last_active")
+          .eq("user_id", authData.user.id)
+          .maybeSingle();
+
+        let secondsSinceLastActive = Number.POSITIVE_INFINITY;
+        if (sessionData?.last_active) {
+          const lastActive = new Date(sessionData.last_active).getTime();
+          const now = new Date().getTime();
+          secondsSinceLastActive = (now - lastActive) / 1000;
+        }
+
+        if (sessionData?.is_logged_in && secondsSinceLastActive < 15) {
+          await supabase.auth.signOut();
+          toast({
+            title: "Access Denied",
+            description: "You are already logged in on another tab or device. Please log out from there first or wait a few seconds and try again.",
+            variant: "destructive",
+          });
+          await sendAuditLog("CONCURRENT_LOGIN_BLOCKED", "Authentication System", email);
+          setLoading(false);
+          return;
+        }
+
+        await supabase
+          .from("user_sessions")
+          .upsert({
+            user_id: authData.user.id,
+            is_logged_in: true,
+            last_active: new Date().toISOString(),
+          });
+
         await check2FA();
       }
     } else {

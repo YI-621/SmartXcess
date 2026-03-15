@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Assessment } from "@/lib/assessment";
+import { supabase } from "@/integrations/supabase/client";
 
 const statusStyles: Record<string, string> = {
   Moderating: "bg-primary/10 text-primary border-primary/20",
@@ -22,6 +23,31 @@ const statusStyles: Record<string, string> = {
 };
 
 type UploadPreviewAssessment = Assessment & { isTemporary?: boolean };
+
+const sanitizeInput = (input: string) => input.replace(/['";<>=]/g, "");
+
+const sendAuditLog = async (action: string, documentName = "N/A", attemptEmail?: string) => {
+  try {
+    let targetEmail = attemptEmail;
+
+    if (!targetEmail) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.email) targetEmail = user.email;
+    }
+
+    if (!targetEmail) return;
+
+    const { error } = await supabase.functions.invoke("audit-logger", {
+      body: { userEmail: targetEmail, action, documentName },
+    });
+
+    if (error) throw error;
+  } catch (err) {
+    console.error("Failed to send audit log:", err);
+  }
+};
 
 const Assessments = () => {
   const navigate = useNavigate();
@@ -102,9 +128,43 @@ const Assessments = () => {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Assessment must be under 5MB.",
+        variant: "destructive",
+      });
+      sendAuditLog("UPLOAD_REJECTED_SIZE", file.name, user?.email);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setSelectedFile(null);
+      return;
     }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const header = new Uint8Array(event.target?.result as ArrayBuffer).subarray(0, 5);
+      const hex = Array.from(header)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .toUpperCase();
+
+      if (hex !== "255044462D") {
+        toast({
+          title: "Invalid File Format",
+          description: "Only authentic PDF files are allowed.",
+          variant: "destructive",
+        });
+        sendAuditLog("UPLOAD_REJECTED_SPOOFING", file.name, user?.email);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        setSelectedFile(null);
+        return;
+      }
+
+      setSelectedFile(file);
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   const handleUploadSubmit = async () => {
@@ -162,6 +222,8 @@ const Assessments = () => {
         throw new Error(payload?.detail ?? payload?.reason ?? "Analysis failed");
       }
 
+      sendAuditLog("UPLOAD_SUCCESS", selectedFile.name, user.email);
+
       toast({
         title: "Assessment processed",
         description: `Analysis completed for ${selectedFile.name}.`,
@@ -178,6 +240,7 @@ const Assessments = () => {
       if (fileInputRef.current) fileInputRef.current.value = "";
       uploadSucceeded = true;
     } catch (err: any) {
+      sendAuditLog(`UPLOAD_FAILED: ${err.message}`, selectedFile.name, user.email);
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
       setPendingUploads((prev) =>
         prev.map((assessment) =>
@@ -226,7 +289,7 @@ const Assessments = () => {
                 id="moduleCode"
                 placeholder="e.g. BUS201"
                 value={moduleCode}
-                onChange={(e) => setModuleCode(e.target.value)}
+                onChange={(e) => setModuleCode(sanitizeInput(e.target.value))}
               />
               <p className="text-[10px] text-muted-foreground">The moderator assigned to this module will review your assessment.</p>
             </div>
@@ -236,12 +299,12 @@ const Assessments = () => {
                 id="pdfName"
                 placeholder="e.g. Final Exam BUS201"
                 value={pdfName}
-                onChange={(e) => setPdfName(e.target.value)}
+                onChange={(e) => setPdfName(sanitizeInput(e.target.value))}
               />
               <p className="text-[10px] text-muted-foreground">Optional. This name will be used for the saved assessment title.</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="assessmentFile">Assessment File</Label>
+              <Label htmlFor="assessmentFile">Assessment File (PDF only, max 5MB)</Label>
               <Input
                 id="assessmentFile"
                 type="file"
@@ -251,9 +314,12 @@ const Assessments = () => {
               />
             </div>
             {selectedFile && (
-              <div className="rounded-lg bg-muted/50 p-3 text-sm">
-                <p className="font-medium text-card-foreground">{selectedFile.name}</p>
-                <p className="text-xs text-muted-foreground">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+              <div className="rounded-lg bg-muted/50 p-3 text-sm border border-success/30">
+                <div className="flex justify-between items-center">
+                  <p className="font-medium text-card-foreground">{selectedFile.name}</p>
+                  <Badge variant="outline" className="bg-success/10 text-success border-success/20 text-[10px]">Verified PDF</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{(selectedFile.size / 1024).toFixed(1)} KB</p>
               </div>
             )}
             <Button
@@ -299,7 +365,7 @@ const Assessments = () => {
           type="text"
           placeholder="Search assessments..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => setSearch(sanitizeInput(e.target.value))}
           className="w-full rounded-lg border border-input bg-card pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>

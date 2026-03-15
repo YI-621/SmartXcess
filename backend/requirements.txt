@@ -7,3 +7,4 @@ groq==0.20.0
 tavily-python==0.5.1
 pymupdf==1.25.5
 python-dotenv==1.0.1
+cryptography==44.0.2
