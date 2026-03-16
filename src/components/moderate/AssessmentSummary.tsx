@@ -8,6 +8,22 @@ interface AssessmentSummaryProps {
 export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
   const avgComplexity = Math.round(assessment.questions.reduce((s, q) => s + q.complexity, 0) / assessment.questions.length);
   const avgSimilarity = Math.round(assessment.questions.reduce((s, q) => s + q.similarityScore, 0) / assessment.questions.length);
+
+  const internalSimilarityValues = assessment.questions
+    .map((q) => q.moderationDetails?.internal_similarity_score)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const externalSimilarityValues = assessment.questions
+    .map((q) => q.moderationDetails?.external_similarity_score)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  const avgInternalSimilarity = internalSimilarityValues.length
+    ? Math.round(internalSimilarityValues.reduce((sum, value) => sum + value, 0) / internalSimilarityValues.length)
+    : avgSimilarity;
+
+  const avgExternalSimilarity = externalSimilarityValues.length
+    ? Math.round(externalSimilarityValues.reduce((sum, value) => sum + value, 0) / externalSimilarityValues.length)
+    : avgSimilarity;
+
   const bloomCoverage = new Set(assessment.questions.map((q) => q.bloomLevel)).size;
 
   const difficultyScoreMap = {
@@ -62,9 +78,14 @@ export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
             description: "Average cognitive complexity score across all questions. Higher means more demanding questions.",
           },
           {
-            label: "Avg Similarity",
-            value: `${avgSimilarity}%`,
-            description: "Average similarity to matched question sources. Higher values indicate more overlap and higher plagiarism risk.",
+            label: "Avg Internal Similarity",
+            value: `${avgInternalSimilarity}%`,
+            description: "Average similarity against internal question sources. Higher values indicate more overlap with your institution's repository.",
+          },
+          {
+            label: "Avg External Similarity",
+            value: `${avgExternalSimilarity}%`,
+            description: "Average similarity against external/public sources. Higher values indicate more overlap with external materials.",
           },
           {
             label: "Bloom Levels",

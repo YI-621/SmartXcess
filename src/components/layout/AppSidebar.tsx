@@ -1,4 +1,4 @@
-import { ClipboardCheck, FileText, History, Home, LogOut, Shield, User, Users } from "lucide-react";
+import { ChevronLeft, ClipboardCheck, FileText, History, Home, LogOut, Shield, User, Users } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
 
 const roleNavItems: Record<string, { to: string; icon: any; label: string }[]> = {
   lecturer: [
@@ -24,7 +25,12 @@ const roleNavItems: Record<string, { to: string; icon: any; label: string }[]> =
   ],
 };
 
-export function AppSidebar() {
+type AppSidebarProps = {
+  isOpen: boolean;
+  onToggle: () => void;
+};
+
+export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
   const location = useLocation();
   const { profile, activeRole, roles, signOut, user } = useAuth();
   const { toast } = useToast();
@@ -135,15 +141,31 @@ export function AppSidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-card flex flex-col">
-      <div className="flex h-16 items-center gap-2.5 border-b border-border px-6">
+    <aside
+      className={cn(
+        "fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-card flex flex-col transition-transform duration-300",
+        isOpen ? "translate-x-0" : "-translate-x-full"
+      )}
+      aria-hidden={!isOpen}
+    >
+      <div className="flex h-16 items-center justify-between gap-2.5 border-b border-border px-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
           <ClipboardCheck className="h-4 w-4 text-primary-foreground" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-sm font-semibold text-foreground">SmartXcess</h1>
           <p className="text-[10px] text-muted-foreground">Assessment Moderator</p>
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onToggle}
+          aria-label="Close sidebar"
+          className="h-8 w-8"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
