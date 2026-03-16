@@ -493,7 +493,7 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
     const allAssignedDone = assignedModeratorIds.length > 0 && completedAssignedModeratorIds.length >= assignedModeratorIds.length;
     const completedWithoutExplicitAssignments = assignedModeratorIds.length === 0 && effectiveCompletedModeratorIds.length > 0;
     const resolvedStatus =
-      explicitStatus === "Approved" || explicitStatus === "Rejected"
+      explicitStatus === "Approved" || explicitStatus === "Rejected" || explicitStatus === "Done"
         ? explicitStatus
         : allAssignedDone || completedWithoutExplicitAssignments
           ? "Done"
@@ -930,22 +930,22 @@ export function useActivityLogs() {
           fetchUserModuleMap(),
           (supabase.from("user_roles") as any)
             .select("user_id, role")
-            .in("role", ["lecturer", "moderator"]),
+            .eq("role", "lecturer"),
         ]);
 
-        const { data: supervisedRoles, error: roleError } = roleRes;
+        const { data: supervisedLecturerRoles, error: roleError } = roleRes;
 
         if (roleError) throw roleError;
 
-        const roleUserIds = new Set(
-          ((supervisedRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
+        const lecturerUserIds = new Set(
+          ((supervisedLecturerRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
         );
 
         const supervisedUserIds = [
           ...new Set(
             Object.entries(userModuleMap)
               .filter(([mappedUserId, modules]) => {
-                if (!roleUserIds.has(mappedUserId)) return false;
+                if (!lecturerUserIds.has(mappedUserId)) return false;
                 return modules.some((moduleCode) => adminModuleSet.has(normalizeModuleCode(moduleCode)));
               })
               .map(([mappedUserId]) => mappedUserId)

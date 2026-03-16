@@ -5,7 +5,7 @@ import { QuestionCard } from "@/components/moderate/QuestionCard";
 import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, CheckCircle, Pencil, Loader2 } from "lucide-react";
-import { useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity } from "@/hooks/useData";
+import { useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity, useUpdateAssessmentStatus } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -26,6 +26,7 @@ const HistoryPage = () => {
 
   const assessments = dbAssessments ?? [];
 
+  const updateStatus = useUpdateAssessmentStatus();
   const history = assessments.filter(
     (a) => a.status === "Approved" || a.status === "Rejected" || a.status === "Done"
   );
@@ -66,6 +67,7 @@ const HistoryPage = () => {
         await Promise.all(publishTargets.map((item) => saveComment.mutateAsync(item)));
       }
 
+      await updateStatus.mutateAsync({ id: selected.id, status: "Done" });
       logActivity.mutate({ type: "moderation_complete", description: `${selected.title} moderation completed`, assessmentId: selectedId });
       toast({ title: "Assessment marked as done" });
       setSelectedId(null);

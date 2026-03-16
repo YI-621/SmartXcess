@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, Loader2, ArrowLeft, FileText } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useAssessmentWithQuestions, useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity } from "@/hooks/useData";
+import { useAssessmentWithQuestions, useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity, useUpdateAssessmentStatus } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,7 @@ const Moderate = () => {
   });
   const saveComment = useSaveComment();
   const logActivity = useLogActivity();
+  const updateStatus = useUpdateAssessmentStatus();
 
   const [comments, setComments] = useState<Record<string, string>>({});
 
@@ -81,6 +82,8 @@ const Moderate = () => {
       if (publishTargets.length > 0) {
         await Promise.all(publishTargets.map((item) => saveComment.mutateAsync(item)));
       }
+
+      await updateStatus.mutateAsync({ id, status: "Done" });
 
       logActivity.mutate({ type: "moderation_complete", description: `${assessment!.title} moderation completed`, assessmentId: id });
       toast({ title: "Moderation submitted", description: "Your moderation has been recorded for this assessment." });

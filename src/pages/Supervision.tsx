@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, Loader2, GraduationCap, ClipboardCheck } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 type SupervisedUser = {
   user_id: string;
@@ -16,14 +17,55 @@ type SupervisedUser = {
 export default function Supervision() {
   const [users, setUsers] = useState<SupervisedUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+
+  const normalizeModuleCode = (value: string | null | undefined) => (value ?? "").trim().toUpperCase();
 
   useEffect(() => {
     fetchSupervisedUsers();
-  }, []);
+  }, [user?.id]);
 
   const fetchSupervisedUsers = async () => {
-    const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, department");
-    const { data: roles } = await supabase.from("user_roles").select("user_id, role");
+    if (!user?.id) {
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
+
+    const [profilesRes, rolesRes, moduleMapRes] = await Promise.all([
+      supabase.from("profiles").select("user_id, full_name, department"),
+      supabase.from("user_roles").select("user_id, role"),
+      supabase.from("system_settings").select("value").eq("key", "user_module_map").maybeSingle(),
+    ]);
+
+    const profiles = profilesRes.data ?? [];
+    const roles = rolesRes.data ?? [];
+
+    const rawModuleMap =
+      moduleMapRes.data?.value && typeof moduleMapRes.data.value === "object" && !Array.isArray(moduleMapRes.data.value)
+        ? (moduleMapRes.data.value as Record<string, unknown>)
+        : {};
+
+    const userModuleMap = new Map<string, string[]>();
+    for (const [mappedUserId, rawModules] of Object.entries(rawModuleMap)) {
+      if (!Array.isArray(rawModules)) continue;
+      const normalizedModules = rawModules
+        .map((moduleCode) => (typeof moduleCode === "string" ? normalizeModuleCode(moduleCode) : ""))
+        .filter(Boolean);
+      userModuleMap.set(mappedUserId, [...new Set(normalizedModules)]);
+    }
+
+    const fallbackModule = normalizeModuleCode((user.user_metadata as any)?.module_code as string | undefined);
+    const adminModules = new Set<string>([
+      ...(userModuleMap.get(user.id) ?? []),
+      ...(fallbackModule ? [fallbackModule] : []),
+    ]);
+
+    if (adminModules.size === 0) {
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
 
     if (profiles) {
       const mapped = profiles
@@ -33,7 +75,11 @@ export default function Supervision() {
           department: p.department,
           roles: roles?.filter((r) => r.user_id === p.user_id).map((r) => r.role) ?? [],
         }))
-        .filter((u) => u.roles.includes("lecturer") || u.roles.includes("moderator"));
+        .filter((u) => {
+          if (!(u.roles.includes("lecturer") || u.roles.includes("moderator"))) return false;
+          const targetModules = userModuleMap.get(u.user_id) ?? [];
+          return targetModules.some((moduleCode) => adminModules.has(moduleCode));
+        });
       setUsers(mapped);
     }
     setLoading(false);
