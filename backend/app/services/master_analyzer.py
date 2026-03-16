@@ -485,6 +485,8 @@ def normalize_difficulty(value: str | None) -> str:
         "very easy": "Very Easy",
         "easy": "Easy",
         "medium": "Medium",
+        "high": "Hard",
+        "very high": "Very Hard",
         "hard": "Hard",
         "very hard": "Very Hard",
     }
@@ -495,8 +497,12 @@ def normalize_difficulty(value: str | None) -> str:
     collapsed = cleaned.replace("-", " ").replace("_", " ")
     if "very hard" in collapsed:
         return "Very Hard"
+    if "very high" in collapsed:
+        return "Very Hard"
     if "very easy" in collapsed:
         return "Very Easy"
+    if "high" in collapsed:
+        return "Hard"
     if "hard" in collapsed:
         return "Hard"
     if "easy" in collapsed:
@@ -505,6 +511,26 @@ def normalize_difficulty(value: str | None) -> str:
         return "Medium"
 
     return "Medium"
+
+
+def _insert_with_schema_fallback(table_name: str, rows: list[dict], warning_prefix: str) -> None:
+    """Insert rows and drop unknown columns reported by PostgREST schema drift errors."""
+    candidate_rows = copy.deepcopy(rows)
+
+    while True:
+        try:
+            supabase.table(table_name).insert(candidate_rows).execute()
+            return
+        except Exception as insert_error:
+            error_text = str(insert_error)
+            missing_col_match = re.search(r"Could not find the '([^']+)' column", error_text)
+            if not missing_col_match:
+                raise
+
+            missing_col = missing_col_match.group(1)
+            print(f"   ⚠ {warning_prefix}: dropping unknown column '{missing_col}' and retrying...")
+            for row in candidate_rows:
+                row.pop(missing_col, None)
 
 # =========================================================
 # 5. CORE SYSTEM: MERGE & SAVE (ONE ROW PER QUESTION)
@@ -626,23 +652,11 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
         
         print("   💾 Saving all results to Supabase...")
         try:
-            rows_to_insert = copy.deepcopy(all_questions_data)
-
-            # Retry insert if PostgREST reports unknown columns in current schema.
-            while True:
-                try:
-                    supabase.table("question_analysis_results").insert(rows_to_insert).execute()
-                    break
-                except Exception as insert_error:
-                    error_text = str(insert_error)
-                    missing_col_match = re.search(r"Could not find the '([^']+)' column", error_text)
-                    if not missing_col_match:
-                        raise
-
-                    missing_col = missing_col_match.group(1)
-                    print(f"   ⚠ Schema mismatch: dropping unknown column '{missing_col}' and retrying...")
-                    for row in rows_to_insert:
-                        row.pop(missing_col, None)
+            _insert_with_schema_fallback(
+                "question_analysis_results",
+                all_questions_data,
+                "Schema mismatch",
+            )
 
             print(f"🏆 OVERALL PAPER SIMILARITY: {overall_score:.1f}%")
             print("   ✅ SUCCESS: All data securely stored!")
@@ -729,23 +743,11 @@ def process_and_save_internal_questions(
         })
 
     try:
-        candidate_rows = copy.deepcopy(rows_to_insert)
-
-        # If Supabase schema lags behind the code, remove unknown columns and retry.
-        while True:
-            try:
-                supabase.table("internal_questions").insert(candidate_rows).execute()
-                break
-            except Exception as insert_error:
-                error_text = str(insert_error)
-                missing_col_match = re.search(r"Could not find the '([^']+)' column", error_text)
-                if not missing_col_match:
-                    raise
-
-                missing_col = missing_col_match.group(1)
-                print(f"   ⚠ Schema mismatch on internal_questions: dropping column '{missing_col}' and retrying...")
-                for row in candidate_rows:
-                    row.pop(missing_col, None)
+        _insert_with_schema_fallback(
+            "internal_questions",
+            rows_to_insert,
+            "Schema mismatch on internal_questions",
+        )
 
         return {
             "saved": True,
