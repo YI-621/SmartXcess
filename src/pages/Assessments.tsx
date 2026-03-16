@@ -63,7 +63,9 @@ const Assessments = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedModeratingAssessment, setSelectedModeratingAssessment] = useState<UploadPreviewAssessment | null>(null);
   const [pendingUploads, setPendingUploads] = useState<UploadPreviewAssessment[]>([]);
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.DEV ? "http://localhost:8000" : "");
+  const apiBaseUrl = import.meta.env.DEV
+    ? ((import.meta.env.VITE_API_BASE_URL_LOCAL as string | undefined) ?? "http://127.0.0.1:8000")
+    : ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "");
   const pendingStorageKey = useMemo(
     () => (user?.id ? `smartxcess.pendingUploads:${user.id}` : null),
     [user?.id]

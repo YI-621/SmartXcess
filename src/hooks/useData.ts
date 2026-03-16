@@ -101,12 +101,12 @@ const complexityFallbackByDifficulty: Record<Question["difficulty"], number> = {
   "Very Hard": 90,
 };
 
-function parseComplexity(value: string | null): number | null {
-  if (!value) return null;
+function parseComplexity(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
   const numeric = Number.parseFloat(String(value).replace(/[^0-9.-]/g, ""));
   if (Number.isFinite(numeric)) return toPercent(numeric);
 
-  const normalized = normalizeDifficulty(value);
+  const normalized = normalizeDifficulty(String(value));
   return complexityFallbackByDifficulty[normalized];
 }
 
@@ -374,17 +374,23 @@ async function fetchModerationCompletionMap(): Promise<ModerationCompletionMap> 
 
 function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Question {
   const dbDifficulty = (row as { difficulty?: string | null }).difficulty ?? null;
-  const normalizedDifficulty = normalizeDifficulty(dbDifficulty ?? row.complexity);
-  const parsedComplexity = parseComplexity(row.complexity);
+  const normalizedDifficulty = normalizeDifficulty(dbDifficulty);
+  const parsedComplexity = parseComplexity((row as { complexity?: unknown }).complexity ?? row.difficulty_reason);
   const complexity = parsedComplexity ?? complexityFallbackByDifficulty[normalizedDifficulty];
   const internalSimilarity = Number((row as any).internal_similarity_score);
   const externalSimilarity = Number((row as any).external_similarity_score);
   const finalSimilarity = Number((row as any).final_sim_score);
+  const overallInternalSimilarity = Number((row as any).overall_internal_similarity);
+  const overallExternalSimilarity = Number((row as any).overall_external_similarity);
 
   const similarity = toPercent(
     Number.isFinite(finalSimilarity)
       ? finalSimilarity
-      : row.similarity_score ?? row.overall_similarity ?? 0
+      : Number.isFinite(overallInternalSimilarity) && Number.isFinite(overallExternalSimilarity)
+        ? Math.max(overallInternalSimilarity, overallExternalSimilarity)
+        : Number.isFinite(internalSimilarity) && Number.isFinite(externalSimilarity)
+          ? Math.max(internalSimilarity, externalSimilarity)
+          : 0
   );
 
   const similarityType: "internal" | "external" | "overall" =
@@ -412,7 +418,7 @@ function mapAnalysisRowToQuestion(row: DbQuestionAnalysisRow, index: number): Qu
       similarity_type_used: similarityType,
       suggestion: row.suggestion ?? undefined,
       validated_bloom_keywords: row.validated_bloom_keywords ?? undefined,
-      raw_complexity: row.complexity ?? undefined,
+      raw_complexity: parsedComplexity !== null ? String(parsedComplexity) : undefined,
     },
   };
 }
@@ -480,13 +486,16 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
     const assignedModeratorIds = moderatorsByModule.get(normalizeModuleCode(first.module_code ?? "")) ?? [];
     const completedModeratorIds = completionMap[key] ?? [];
     const completedAssignedModeratorIds = assignedModeratorIds.filter((moderatorId) => completedModeratorIds.includes(moderatorId));
+    const effectiveCompletedModeratorIds =
+      assignedModeratorIds.length > 0 ? completedAssignedModeratorIds : completedModeratorIds;
 
     const explicitStatus = normalizeAssessmentStatus(statusMap[key] ?? "Pending");
     const allAssignedDone = assignedModeratorIds.length > 0 && completedAssignedModeratorIds.length >= assignedModeratorIds.length;
+    const completedWithoutExplicitAssignments = assignedModeratorIds.length === 0 && effectiveCompletedModeratorIds.length > 0;
     const resolvedStatus =
       explicitStatus === "Approved" || explicitStatus === "Rejected"
         ? explicitStatus
-        : allAssignedDone
+        : allAssignedDone || completedWithoutExplicitAssignments
           ? "Done"
           : "Pending";
 
@@ -500,10 +509,10 @@ async function fetchModerationAssessmentsFromAnalysis(): Promise<Assessment[]> {
       date: first.created_at ? new Date(first.created_at).toLocaleDateString() : "N/A",
       status: resolvedStatus,
       moderationProgress: {
-        assigned: assignedModeratorIds.length,
-        completed: completedAssignedModeratorIds.length,
+        assigned: assignedModeratorIds.length > 0 ? assignedModeratorIds.length : effectiveCompletedModeratorIds.length,
+        completed: effectiveCompletedModeratorIds.length,
         assignedModeratorIds,
-        completedModeratorIds: completedAssignedModeratorIds,
+        completedModeratorIds: effectiveCompletedModeratorIds,
       },
       questions,
       overallScore,
@@ -544,15 +553,13 @@ async function applyAssessmentRoleFilter(
   if (activeRole === "moderator") {
     const allowedModules = await fetchCurrentUserModuleCodes(userId, defaultModuleCode);
     if (allowedModules.length === 0) {
-      return assessments.filter((assessment) => {
-        const uploader = assessment.uploadedBy ?? parseAssessmentGroupingKey(assessment.id)?.uploadedBy;
-        return uploader === userId;
-      });
+      return [];
     }
     const allowedSet = new Set(allowedModules.map(normalizeModuleCode));
     return assessments.filter((assessment) => {
       const uploadedBy = assessment.uploadedBy ?? parseAssessmentGroupingKey(assessment.id)?.uploadedBy;
-      return uploadedBy === userId || allowedSet.has(normalizeModuleCode(assessment.course));
+      if (uploadedBy === userId) return false;
+      return allowedSet.has(normalizeModuleCode(assessment.course));
     });
   }
 

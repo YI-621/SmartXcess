@@ -47,7 +47,9 @@ export default function Admin() {
   const { toast } = useToast();
   const { data: assessments = [], isLoading: loadingAssessments } = useAssessmentsWithQuestions();
   const flaggedAssessments = assessments.filter((assessment) => assessment.flagged);
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.DEV ? "http://localhost:8000" : "");
+  const apiBaseUrl = import.meta.env.DEV
+    ? ((import.meta.env.VITE_API_BASE_URL_LOCAL as string | undefined) ?? "http://127.0.0.1:8000")
+    : ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "");
 
   useEffect(() => {
     fetchUsers();
@@ -213,7 +215,7 @@ export default function Admin() {
 
       toast({
         title: "Past year questions uploaded",
-        description: `${payload?.rows ?? 0} question(s) saved to exam_questions.`,
+        description: `${payload?.rows ?? 0} question(s) saved to internal_questions.`,
       });
 
       setPastYearModuleCode("");

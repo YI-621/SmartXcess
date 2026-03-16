@@ -4,7 +4,7 @@ import { AssessmentSummary } from "@/components/moderate/AssessmentSummary";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, Loader2, ArrowLeft, FileText } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAssessmentWithQuestions, useAssessmentsWithQuestions, useModerationComments, useSaveComment, useLogActivity } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -54,6 +54,19 @@ const Moderate = () => {
     });
     return map;
   }, [dbComments, user?.id]);
+
+  useEffect(() => {
+    if (!assessment) return;
+    setComments((prev) => {
+      const next = { ...prev };
+      for (const q of assessment.questions) {
+        if (next[q.id] === undefined && existingComments[q.id] !== undefined) {
+          next[q.id] = existingComments[q.id];
+        }
+      }
+      return next;
+    });
+  }, [assessment, existingComments]);
 
   const handleCommentChange = (questionId: string, value: string) => {
     setComments((prev) => ({ ...prev, [questionId]: value }));

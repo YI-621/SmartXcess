@@ -44,7 +44,10 @@ def _load_analyzer_once() -> None:
   global _process_and_save_exam, _process_and_save_internal_questions
 
   try:
-    from app.services.master_analyzer import process_and_save_exam, process_and_save_internal_questions
+    try:
+      from app.services.master_analyzer import process_and_save_exam, process_and_save_internal_questions
+    except Exception:
+      from backend.app.services.master_analyzer import process_and_save_exam, process_and_save_internal_questions
 
     _process_and_save_exam = process_and_save_exam
     _process_and_save_internal_questions = process_and_save_internal_questions
