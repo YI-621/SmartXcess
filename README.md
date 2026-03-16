@@ -6,7 +6,7 @@ For deployed frontend builds on GitHub Pages, configure the backend URL to your 
 
 ```bash
 # .env.production
-VITE_API_BASE_URL=https://smartxcess-gej3.onrender.com
+VITE_API_BASE_URL=https://smartxcess-mxu1.onrender.com
 ```
 
 2. Set backend CORS origins (comma-separated):
