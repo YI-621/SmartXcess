@@ -68,7 +68,7 @@ const HistoryPage = () => {
       }
 
       await updateStatus.mutateAsync({ id: selected.id, status: "Done" });
-      logActivity.mutate({ type: "moderation_complete", description: `${selected.title} moderation completed`, assessmentId: selectedId });
+      await logActivity.mutateAsync({ type: "moderation_complete", description: `${selected.title} moderation completed`, assessmentId: selectedId });
       toast({ title: "Assessment marked as done" });
       setSelectedId(null);
     }

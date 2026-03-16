@@ -926,35 +926,53 @@ export function useActivityLogs() {
 
         const adminModuleSet = new Set(adminModuleCodes.map(normalizeModuleCode));
 
-        const [userModuleMap, roleRes] = await Promise.all([
+        const [userModuleMap, roleRes, moderatorAssignmentsByModule, assessments] = await Promise.all([
           fetchUserModuleMap(),
           (supabase.from("user_roles") as any)
             .select("user_id, role")
-            .eq("role", "lecturer"),
+            .in("role", ["lecturer", "moderator"]),
+          fetchModeratorAssignmentsByModule(),
+          fetchModerationAssessmentsFromAnalysis(),
         ]);
 
-        const { data: supervisedLecturerRoles, error: roleError } = roleRes;
+        const { data: supervisedRoles, error: roleError } = roleRes;
 
         if (roleError) throw roleError;
 
-        const lecturerUserIds = new Set(
-          ((supervisedLecturerRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
+        const roleUserIds = new Set(
+          ((supervisedRoles ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id).filter(Boolean)
         );
 
-        const supervisedUserIds = [
-          ...new Set(
-            Object.entries(userModuleMap)
-              .filter(([mappedUserId, modules]) => {
-                if (!lecturerUserIds.has(mappedUserId)) return false;
-                return modules.some((moduleCode) => adminModuleSet.has(normalizeModuleCode(moduleCode)));
-              })
-              .map(([mappedUserId]) => mappedUserId)
-          ),
-        ] as string[];
+        const supervisedUserIds = new Set<string>();
 
-        if (supervisedUserIds.length === 0) return [] as DbActivityLog[];
+        for (const [mappedUserId, modules] of Object.entries(userModuleMap)) {
+          if (!roleUserIds.has(mappedUserId)) continue;
+          if (modules.some((moduleCode) => adminModuleSet.has(normalizeModuleCode(moduleCode)))) {
+            supervisedUserIds.add(mappedUserId);
+          }
+        }
 
-        const { data, error } = await baseQuery.in("user_id", supervisedUserIds);
+        for (const moduleCode of adminModuleSet) {
+          for (const moderatorId of moderatorAssignmentsByModule.get(moduleCode) ?? []) {
+            supervisedUserIds.add(moderatorId);
+          }
+        }
+
+        for (const assessment of assessments) {
+          if (!adminModuleSet.has(normalizeModuleCode(assessment.course))) continue;
+          if (assessment.uploadedBy) supervisedUserIds.add(assessment.uploadedBy);
+          for (const moderatorId of assessment.moderationProgress?.assignedModeratorIds ?? []) {
+            supervisedUserIds.add(moderatorId);
+          }
+          for (const moderatorId of assessment.moderationProgress?.completedModeratorIds ?? []) {
+            supervisedUserIds.add(moderatorId);
+          }
+        }
+
+        const supervisedUserIdList = [...supervisedUserIds];
+        if (supervisedUserIdList.length === 0) return [] as DbActivityLog[];
+
+        const { data, error } = await baseQuery.in("user_id", supervisedUserIdList);
         if (error) throw error;
         return (data ?? []) as DbActivityLog[];
       }
@@ -976,12 +994,13 @@ export function useLogActivity() {
       if (!user || !type || !description) return;
 
       const userName = profile?.full_name ?? user.email ?? "Unknown";
+      const persistedAssessmentId = assessmentId && isUuid(assessmentId) ? assessmentId : null;
       const { error } = await (supabase.from("activity_logs" as any) as any).insert({
         type,
         description,
         user_id: user.id,
         user_name: userName,
-        assessment_id: assessmentId ?? null,
+        assessment_id: persistedAssessmentId,
       });
 
       if (error) throw error;

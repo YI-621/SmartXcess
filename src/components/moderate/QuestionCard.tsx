@@ -27,6 +27,8 @@ const relevancySteps = [
   { label: "Very High", color: "bg-emerald-500" },
 ] as const;
 
+const displayedRelevancySteps = [...relevancySteps].reverse();
+
 function normalizeRelevancy(raw: unknown): { label: string; index: number } {
   const byIndex = (index: number): { label: string; index: number } => {
     const clamped = Math.max(0, Math.min(4, index));
@@ -162,8 +164,10 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
             <span className="font-medium text-card-foreground">{relevancy.label}</span>
           </div>
           <div className="flex gap-1">
-            {relevancySteps.map((step, idx) => {
-              const isActive = idx <= relevancy.index;
+            {displayedRelevancySteps.map((step, idx) => {
+              const sourceIndex = relevancySteps.findIndex((candidate) => candidate.label === step.label);
+              const isActive = relevancy.index >= 0 && sourceIndex >= 4 - relevancy.index;
+              const isCurrent = sourceIndex === relevancy.index;
               return (
                 <div key={step.label} className="flex-1">
                   <div
@@ -171,7 +175,7 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
                     className={cn(
                       "h-2 w-full rounded-sm transition-all cursor-help",
                       isActive ? step.color : "bg-muted",
-                      idx === relevancy.index && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
+                      isCurrent && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
                     )}
                   />
                 </div>

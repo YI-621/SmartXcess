@@ -85,7 +85,7 @@ const Moderate = () => {
 
       await updateStatus.mutateAsync({ id, status: "Done" });
 
-      logActivity.mutate({ type: "moderation_complete", description: `${assessment!.title} moderation completed`, assessmentId: id });
+      await logActivity.mutateAsync({ type: "moderation_complete", description: `${assessment!.title} moderation completed`, assessmentId: id });
       toast({ title: "Moderation submitted", description: "Your moderation has been recorded for this assessment." });
       setSearchParams({});
     }

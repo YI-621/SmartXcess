@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { useAssessmentsWithQuestions } from "@/hooks/useData";
+import { useAssessmentsWithQuestions, useLogActivity } from "@/hooks/useData";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -55,6 +55,7 @@ const Assessments = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const logActivity = useLogActivity();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -225,6 +226,10 @@ const Assessments = () => {
       }
 
       sendAuditLog("UPLOAD_SUCCESS", selectedFile.name, user.email);
+      await logActivity.mutateAsync({
+        type: "upload",
+        description: `${previewTitle} uploaded for moderation`,
+      });
 
       toast({
         title: "Assessment processed",
