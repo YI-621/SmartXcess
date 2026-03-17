@@ -514,6 +514,49 @@ def normalize_difficulty(value: str | None) -> str:
     return "Medium"
 
 
+def normalize_relevancy_to_scope(value) -> int | None:
+    """Normalize LLM relevancy output to DB-safe 1..5 integer or None."""
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            return None
+        rounded = int(round(value))
+        return max(1, min(5, rounded))
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+    if lowered in {"n/a", "na", "none", "null", "unknown"}:
+        return None
+
+    numeric_match = re.search(r"\d+(?:\.\d+)?", lowered)
+    if numeric_match:
+        try:
+            parsed = float(numeric_match.group(0))
+            rounded = int(round(parsed))
+            return max(1, min(5, rounded))
+        except Exception:
+            pass
+
+    label_map = {
+        "very low": 1,
+        "low": 2,
+        "medium": 3,
+        "high": 4,
+        "very high": 5,
+    }
+
+    for label, score in label_map.items():
+        if label in lowered:
+            return score
+
+    return None
+
+
 def _insert_with_schema_fallback(table_name: str, rows: list[dict], warning_prefix: str) -> None:
     """Insert rows and drop unknown columns reported by PostgREST schema drift errors."""
     candidate_rows = copy.deepcopy(rows)
@@ -631,7 +674,7 @@ def process_and_save_exam(pdf_filename, target_module, user_name, custom_pdf_nam
             "difficulty_reason": llm_info.get("difficulty_reason", "N/A"),
             "grammar_spelling_error": llm_info.get("grammar_errors", "N/A"),
             "grammar_structure": llm_info.get("grammar_structure", "N/A"),
-            "relevancy_to_scope": llm_info.get("relevancy_to_scope", "N/A"),
+            "relevancy_to_scope": normalize_relevancy_to_scope(llm_info.get("relevancy_to_scope")),
             "suggestion": llm_info.get("suggestion", "N/A")
         }
         
