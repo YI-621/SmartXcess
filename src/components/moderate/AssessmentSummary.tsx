@@ -85,7 +85,7 @@ export function AssessmentSummary({ assessment }: AssessmentSummaryProps) {
           {
             label: "Avg External Similarity",
             value: `${avgExternalSimilarity}%`,
-            description: "Average similarity against external/public sources. Higher values indicate more overlap with external materials.",
+            description: "Average similarity against external/public sources. External similarity is not examined when internal similarity exceeds the preset threshold.",
           },
           {
             label: "Bloom Levels",
