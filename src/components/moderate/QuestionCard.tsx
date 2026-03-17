@@ -88,7 +88,14 @@ function normalizeRelevancy(raw: unknown): { label: string; index: number } {
 }
 
 function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) {
-  const activeIndex = difficultyIndicatorSteps.findIndex((step) => step.level === difficulty);
+  const difficultyBarsFilled: Record<Question["difficulty"], number> = {
+    "Very Easy": 5,
+    Easy: 4,
+    Medium: 3,
+    Hard: 2,
+    "Very Hard": 1,
+  };
+  const filledBars = difficultyBarsFilled[difficulty] ?? 0;
 
   return (
     <div aria-label={`Difficulty indicator: ${difficulty}`} className="space-y-1">
@@ -98,7 +105,8 @@ function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) 
       </div>
       <div className="flex gap-1">
         {difficultyIndicatorSteps.map((step, index) => {
-          const isActive = index <= activeIndex;
+          const isActive = index < filledBars;
+          const isCurrent = index === filledBars - 1;
           return (
             <div key={step.level} className="flex-1">
               <div
@@ -106,7 +114,7 @@ function DifficultyBars({ difficulty }: { difficulty: Question["difficulty"] }) 
                 className={cn(
                   "h-2 w-full rounded-sm transition-all cursor-help",
                   isActive ? step.color : "bg-muted",
-                  index === activeIndex && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
+                  isCurrent && "ring-1 ring-offset-1 ring-offset-background ring-foreground/30"
                 )}
               />
             </div>
@@ -163,8 +171,9 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
           </div>
           <div className="flex gap-1">
             {relevancySteps.map((step, idx) => {
-              const isActive = relevancy.index >= 0 && idx <= relevancy.index;
-              const isCurrent = idx === relevancy.index;
+              const filledBars = relevancy.index >= 0 ? 5 - relevancy.index : 0;
+              const isActive = idx < filledBars;
+              const isCurrent = idx === filledBars - 1;
               return (
                 <div key={step.label} className="flex-1">
                   <div
