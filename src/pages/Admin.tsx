@@ -99,21 +99,46 @@ export default function Admin() {
   };
 
   const fetchUserModuleMap = async (): Promise<UserModuleMap> => {
-    const { data } = await supabase
-      .from("system_settings")
-      .select("value")
-      .eq("key", "user_module_map")
-      .maybeSingle();
+    const [settingsRes, moderatorModulesRes, analysisRowsRes, assessmentsRes] = await Promise.all([
+      supabase.from("system_settings").select("value").eq("key", "user_module_map").maybeSingle(),
+      supabase.from("moderator_modules").select("user_id, module_code"),
+      supabase.from("question_analysis_results").select("uploaded_by, module_code"),
+      supabase.from("assessments").select("lecturer_id, moderator_id, course"),
+    ]);
 
-    if (!data?.value || typeof data.value !== "object" || Array.isArray(data.value)) return {};
-
+    const data = settingsRes.data;
     const map: UserModuleMap = {};
-    for (const [userId, modules] of Object.entries(data.value as Record<string, unknown>)) {
-      if (!Array.isArray(modules)) continue;
-      map[userId] = modules
-        .map((moduleCode) => (typeof moduleCode === "string" ? normalizeModuleCode(moduleCode) : ""))
-        .filter(Boolean);
+    if (data?.value && typeof data.value === "object" && !Array.isArray(data.value)) {
+      for (const [userId, modules] of Object.entries(data.value as Record<string, unknown>)) {
+        if (!Array.isArray(modules)) continue;
+        map[userId] = modules
+          .map((moduleCode) => (typeof moduleCode === "string" ? normalizeModuleCode(moduleCode) : ""))
+          .filter(Boolean);
+      }
     }
+
+    const mergeModule = (userId: string | null | undefined, moduleCode: string | null | undefined) => {
+      const normalizedUserId = (userId ?? "").trim();
+      const normalizedModule = normalizeModuleCode(moduleCode);
+      if (!normalizedUserId || !normalizedModule) return;
+      const existing = map[normalizedUserId] ?? [];
+      map[normalizedUserId] = [...new Set([...existing, normalizedModule])];
+    };
+
+    for (const row of moderatorModulesRes.data ?? []) {
+      mergeModule((row as { user_id: string | null }).user_id, (row as { module_code: string | null }).module_code);
+    }
+
+    for (const row of analysisRowsRes.data ?? []) {
+      mergeModule((row as { uploaded_by: string | null }).uploaded_by, (row as { module_code: string | null }).module_code);
+    }
+
+    for (const row of assessmentsRes.data ?? []) {
+      const moduleCode = (row as { course: string | null }).course;
+      mergeModule((row as { lecturer_id: string | null }).lecturer_id, moduleCode);
+      mergeModule((row as { moderator_id: string | null }).moderator_id, moduleCode);
+    }
+
     return map;
   };
 
