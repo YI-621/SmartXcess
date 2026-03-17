@@ -44,10 +44,12 @@ export default function Supervision() {
       return;
     }
 
-    const [profilesRes, rolesRes, moduleMapRes] = await Promise.all([
+    const [profilesRes, rolesRes, moduleMapRes, moderatorModulesRes, analysisRowsRes] = await Promise.all([
       supabase.from("profiles").select("user_id, full_name, department"),
       supabase.from("user_roles").select("user_id, role"),
       supabase.from("system_settings").select("value").eq("key", "user_module_map").maybeSingle(),
+      supabase.from("moderator_modules").select("user_id, module_code"),
+      supabase.from("question_analysis_results").select("uploaded_by, module_code"),
     ]);
 
     const profiles = profilesRes.data ?? [];
@@ -65,6 +67,24 @@ export default function Supervision() {
         .map((moduleCode) => (typeof moduleCode === "string" ? normalizeModuleCode(moduleCode) : ""))
         .filter(Boolean);
       userModuleMap.set(mappedUserId, [...new Set(normalizedModules)]);
+    }
+
+    // Include explicit moderator module assignments.
+    for (const row of moderatorModulesRes.data ?? []) {
+      const moduleCode = normalizeModuleCode((row as { module_code: string | null }).module_code);
+      const mappedUserId = (row as { user_id: string | null }).user_id ?? "";
+      if (!mappedUserId || !moduleCode) continue;
+      const existing = userModuleMap.get(mappedUserId) ?? [];
+      userModuleMap.set(mappedUserId, [...new Set([...existing, moduleCode])]);
+    }
+
+    // Infer lecturer supervision modules from uploaded assessments in analysis data.
+    for (const row of analysisRowsRes.data ?? []) {
+      const moduleCode = normalizeModuleCode((row as { module_code: string | null }).module_code);
+      const uploadedBy = (row as { uploaded_by: string | null }).uploaded_by ?? "";
+      if (!uploadedBy || !moduleCode) continue;
+      const existing = userModuleMap.get(uploadedBy) ?? [];
+      userModuleMap.set(uploadedBy, [...new Set([...existing, moduleCode])]);
     }
 
     const fallbackModule = normalizeModuleCode((user.user_metadata as any)?.module_code as string | undefined);

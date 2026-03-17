@@ -203,6 +203,20 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function appendAssessmentKeyToDescription(description: string, assessmentId?: string | null): string {
+  const base = (description ?? "").trim();
+  if (!assessmentId) return base;
+  if (isUuid(assessmentId)) return base;
+  if (base.includes("[assessment_key:")) return base;
+  return `${base} [assessment_key:${assessmentId}]`;
+}
+
+function extractAssessmentKeyFromDescription(description: string | null | undefined): string | null {
+  if (!description) return null;
+  const match = description.match(/\[assessment_key:([^\]]+)\]/);
+  return match?.[1]?.trim() || null;
+}
+
 function parseAssessmentGroupingKey(assessmentId: string | null | undefined): {
   filename: string;
   moduleCode: string;
@@ -351,18 +365,20 @@ async function fetchModeratorAssignmentsByModule(): Promise<Map<string, string[]
 
 async function fetchModerationCompletionMap(): Promise<ModerationCompletionMap> {
   const { data, error } = await (supabase.from("activity_logs" as any) as any)
-    .select("assessment_id, user_id")
-    .eq("type", "moderation_complete")
-    .not("assessment_id", "is", null);
+    .select("assessment_id, user_id, description")
+    .eq("type", "moderation_complete");
 
   if (error || !data) return {};
 
   const grouped = new Map<string, Set<string>>();
-  for (const row of data as Array<{ assessment_id: string | null; user_id: string | null }>) {
-    if (!row.assessment_id || !row.user_id) continue;
-    const set = grouped.get(row.assessment_id) ?? new Set<string>();
+  for (const row of data as Array<{ assessment_id: string | null; user_id: string | null; description: string | null }>) {
+    if (!row.user_id) continue;
+    const assessmentKey = row.assessment_id ?? extractAssessmentKeyFromDescription(row.description);
+    if (!assessmentKey) continue;
+
+    const set = grouped.get(assessmentKey) ?? new Set<string>();
     set.add(row.user_id);
-    grouped.set(row.assessment_id, set);
+    grouped.set(assessmentKey, set);
   }
 
   const out: ModerationCompletionMap = {};
@@ -765,15 +781,23 @@ export function useModerationComments(questionIds: string[], options?: Moderatio
         const [commentsMap, logRes] = await Promise.all([
           fetchModerationCommentsMap(),
           (supabase.from("activity_logs" as any) as any)
-            .select("user_id, created_at")
+            .select("user_id, created_at, assessment_id, description")
             .eq("type", "moderation_complete")
-            .eq("assessment_id", assessmentId),
+            .order("created_at", { ascending: false })
+            .limit(500),
         ]);
 
         const assessmentMap = commentsMap[assessmentId] ?? {};
         const completedAtMap = new Map<string, string>();
-        const logs = (logRes.data ?? []) as Array<{ user_id: string | null; created_at: string | null }>;
+        const logs = (logRes.data ?? []) as Array<{
+          user_id: string | null;
+          created_at: string | null;
+          assessment_id: string | null;
+          description: string | null;
+        }>;
         logs.forEach((row) => {
+          const rowAssessmentKey = row.assessment_id ?? extractAssessmentKeyFromDescription(row.description);
+          if (rowAssessmentKey !== assessmentId) return;
           if (row.user_id && row.created_at) {
             completedAtMap.set(row.user_id, row.created_at);
           }
@@ -828,15 +852,21 @@ export function useModerationComments(questionIds: string[], options?: Moderatio
 
       if (assessmentId) {
         const { data: logs, error: logError } = await (supabase.from("activity_logs" as any) as any)
-          .select("user_id, created_at")
+          .select("user_id, created_at, assessment_id, description")
           .eq("type", "moderation_complete")
-          .eq("assessment_id", assessmentId)
           .order("created_at", { ascending: false })
-          .limit(1);
+          .limit(500);
 
         if (!logError && logs && logs.length > 0) {
-          moderatorId = logs[0].user_id ?? null;
-          moderatorCommentAt = logs[0].created_at ?? null;
+          const matchedLog = logs.find((row: { assessment_id: string | null; description: string | null }) => {
+            const rowAssessmentKey = row.assessment_id ?? extractAssessmentKeyFromDescription(row.description);
+            return rowAssessmentKey === assessmentId;
+          });
+
+          if (matchedLog) {
+            moderatorId = matchedLog.user_id ?? null;
+            moderatorCommentAt = matchedLog.created_at ?? null;
+          }
         }
       }
 
@@ -1019,9 +1049,10 @@ export function useLogActivity() {
 
       const userName = profile?.full_name ?? user.email ?? "Unknown";
       const persistedAssessmentId = assessmentId && isUuid(assessmentId) ? assessmentId : null;
+      const safeDescription = appendAssessmentKeyToDescription(description, assessmentId);
       const { error } = await (supabase.from("activity_logs" as any) as any).insert({
         type,
-        description,
+        description: safeDescription,
         user_id: user.id,
         user_name: userName,
         assessment_id: persistedAssessmentId,
