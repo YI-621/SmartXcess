@@ -542,9 +542,14 @@ async function applyAssessmentRoleFilter(
   assessments: Assessment[],
   userId: string | null | undefined,
   activeRole: string | null | undefined,
+  isSuperAdmin: boolean,
   defaultModuleCode?: string | null
 ): Promise<Assessment[]> {
   if (!userId) return [];
+
+  if (isSuperAdmin) {
+    return assessments;
+  }
 
   if (activeRole === "lecturer") {
     return filterAssessmentsByRole(assessments, userId, activeRole);
@@ -561,6 +566,15 @@ async function applyAssessmentRoleFilter(
       if (uploadedBy === userId) return false;
       return allowedSet.has(normalizeModuleCode(assessment.course));
     });
+  }
+
+  if (activeRole === "admin") {
+    const allowedModules = await fetchCurrentUserModuleCodes(userId, defaultModuleCode);
+    if (allowedModules.length === 0) {
+      return [];
+    }
+    const allowedSet = new Set(allowedModules.map(normalizeModuleCode));
+    return assessments.filter((assessment) => allowedSet.has(normalizeModuleCode(assessment.course)));
   }
 
   return assessments;
@@ -599,16 +613,17 @@ export function toFrontendAssessment(a: DbAssessment, questions: DbQuestion[], l
 // ---- Hooks ----
 
 export function useAssessments() {
-  const { user, activeRole } = useAuth();
+  const { user, activeRole, isSuperAdmin } = useAuth();
   const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["assessments", activeRole, user?.id, defaultModuleCode],
+    queryKey: ["assessments", activeRole, user?.id, defaultModuleCode, isSuperAdmin],
     queryFn: async () => {
       const assessments = await applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
         activeRole,
+        isSuperAdmin,
         defaultModuleCode
       );
       return assessments.map((a) => ({
@@ -631,7 +646,7 @@ export function useAssessments() {
 }
 
 export function useAssessmentWithQuestions(id: string | null) {
-  const { user, activeRole } = useAuth();
+  const { user, activeRole, isSuperAdmin } = useAuth();
   const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   const toIdCandidates = (rawId: string): string[] => {
@@ -661,13 +676,14 @@ export function useAssessmentWithQuestions(id: string | null) {
   };
 
   return useQuery({
-    queryKey: ["assessment", id, activeRole, user?.id, defaultModuleCode],
+    queryKey: ["assessment", id, activeRole, user?.id, defaultModuleCode, isSuperAdmin],
     enabled: !!id,
     queryFn: async () => {
       const assessments = await applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
         activeRole,
+        isSuperAdmin,
         defaultModuleCode
       );
 
@@ -678,16 +694,17 @@ export function useAssessmentWithQuestions(id: string | null) {
 }
 
 export function useAssessmentsWithQuestions() {
-  const { user, activeRole } = useAuth();
+  const { user, activeRole, isSuperAdmin } = useAuth();
   const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["assessments-full", activeRole, user?.id, defaultModuleCode],
+    queryKey: ["assessments-full", activeRole, user?.id, defaultModuleCode, isSuperAdmin],
     queryFn: async () => {
       return applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
         activeRole,
+        isSuperAdmin,
         defaultModuleCode
       );
     },
@@ -695,17 +712,18 @@ export function useAssessmentsWithQuestions() {
 }
 
 export function useQuestions(assessmentId: string | null) {
-  const { user, activeRole } = useAuth();
+  const { user, activeRole, isSuperAdmin } = useAuth();
   const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["questions", assessmentId, activeRole, user?.id, defaultModuleCode],
+    queryKey: ["questions", assessmentId, activeRole, user?.id, defaultModuleCode, isSuperAdmin],
     enabled: !!assessmentId,
     queryFn: async () => {
       const assessments = await applyAssessmentRoleFilter(
         await fetchModerationAssessmentsFromAnalysis(),
         user?.id,
         activeRole,
+        isSuperAdmin,
         defaultModuleCode
       );
       const assessment = assessments.find((a) => a.id === assessmentId!);
@@ -906,11 +924,11 @@ export function useUpdateAssessmentStatus() {
 }
 
 export function useActivityLogs() {
-  const { user, activeRole } = useAuth();
+  const { user, activeRole, isSuperAdmin } = useAuth();
   const defaultModuleCode = (user?.user_metadata as any)?.module_code as string | undefined;
 
   return useQuery({
-    queryKey: ["activity-logs", activeRole, user?.id],
+    queryKey: ["activity-logs", activeRole, user?.id, isSuperAdmin],
     enabled: !!user,
     queryFn: async () => {
       if (!user) return [] as DbActivityLog[];
@@ -920,7 +938,7 @@ export function useActivityLogs() {
         .order("created_at", { ascending: false })
         .limit(30);
 
-      if (activeRole === "admin") {
+      if (activeRole === "admin" && !isSuperAdmin) {
         const adminModuleCodes = await fetchCurrentUserModuleCodes(user.id, defaultModuleCode);
         if (adminModuleCodes.length === 0) return [] as DbActivityLog[];
 
@@ -973,6 +991,12 @@ export function useActivityLogs() {
         if (supervisedUserIdList.length === 0) return [] as DbActivityLog[];
 
         const { data, error } = await baseQuery.in("user_id", supervisedUserIdList);
+        if (error) throw error;
+        return (data ?? []) as DbActivityLog[];
+      }
+
+      if (activeRole === "admin" && isSuperAdmin) {
+        const { data, error } = await baseQuery;
         if (error) throw error;
         return (data ?? []) as DbActivityLog[];
       }

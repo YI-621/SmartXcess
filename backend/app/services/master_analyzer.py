@@ -45,6 +45,7 @@ SUPABASE_KEY = require_env(
     aliases=("SUPABASE_KEY",),
 )
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+DESIGNATED_SUPER_ADMIN_EMAIL = os.getenv("DESIGNATED_SUPER_ADMIN_EMAIL", "wyeyi621@gmail.com").strip().lower()
 
 # --- Groq Config (AI Brain - Shared by both engines) ---
 GROQ_API_KEY_SIMILARITY = require_env("GROQ_API_KEY_SIMILARITY")
@@ -693,7 +694,19 @@ def _is_admin_user(user_id: str) -> bool:
             .limit(1)
             .execute()
         )
-        return bool(response.data)
+        if response.data:
+            return True
+
+        profile = (
+            supabase
+            .table("profiles")
+            .select("email")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        email = ((profile.data or [{}])[0].get("email") or "").strip().lower()
+        return email == DESIGNATED_SUPER_ADMIN_EMAIL
     except Exception:
         return False
 

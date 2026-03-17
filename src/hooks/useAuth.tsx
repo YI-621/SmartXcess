@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
 type AppRole = "admin" | "moderator" | "lecturer";
+const SUPER_ADMIN_EMAIL = "wyeyi621@gmail.com";
 
 interface AuthContextType {
   user: User | null;
@@ -11,6 +12,7 @@ interface AuthContextType {
   roles: AppRole[];
   activeRole: AppRole | null;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   profile: { full_name: string | null; department: string | null; avatar_url: string | null; email: string | null } | null;
   signOut: () => Promise<void>;
   switchRole: (role: AppRole) => void;
@@ -101,8 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const emailToCheck = (profile?.email ?? user?.email ?? "").trim().toLowerCase();
+  const isSuperAdmin = emailToCheck === SUPER_ADMIN_EMAIL;
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, roles, activeRole, isAdmin: roles.includes("admin"), profile, signOut: async () => { await supabase.auth.signOut(); }, switchRole }}>
+    <AuthContext.Provider value={{ user, session, loading, roles, activeRole, isAdmin: roles.includes("admin") || isSuperAdmin, isSuperAdmin, profile, signOut: async () => { await supabase.auth.signOut(); }, switchRole }}>
       {children}
     </AuthContext.Provider>
   );

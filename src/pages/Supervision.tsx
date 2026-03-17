@@ -14,16 +14,28 @@ type SupervisedUser = {
   roles: string[];
 };
 
+const ROLE_DISPLAY_ORDER = ["admin", "moderator", "lecturer"] as const;
+
+function sortRolesForDisplay(roles: string[]): string[] {
+  const order = new Map<string, number>(ROLE_DISPLAY_ORDER.map((role, index) => [role, index]));
+  return [...roles].sort((a, b) => {
+    const aRank = order.get(a) ?? Number.MAX_SAFE_INTEGER;
+    const bRank = order.get(b) ?? Number.MAX_SAFE_INTEGER;
+    if (aRank !== bRank) return aRank - bRank;
+    return a.localeCompare(b);
+  });
+}
+
 export default function Supervision() {
   const [users, setUsers] = useState<SupervisedUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
 
   const normalizeModuleCode = (value: string | null | undefined) => (value ?? "").trim().toUpperCase();
 
   useEffect(() => {
     fetchSupervisedUsers();
-  }, [user?.id]);
+  }, [user?.id, isSuperAdmin]);
 
   const fetchSupervisedUsers = async () => {
     if (!user?.id) {
@@ -61,7 +73,7 @@ export default function Supervision() {
       ...(fallbackModule ? [fallbackModule] : []),
     ]);
 
-    if (adminModules.size === 0) {
+    if (!isSuperAdmin && adminModules.size === 0) {
       setUsers([]);
       setLoading(false);
       return;
@@ -77,6 +89,7 @@ export default function Supervision() {
         }))
         .filter((u) => {
           if (!(u.roles.includes("lecturer") || u.roles.includes("moderator"))) return false;
+          if (isSuperAdmin) return true;
           const targetModules = userModuleMap.get(u.user_id) ?? [];
           return targetModules.some((moduleCode) => adminModules.has(moduleCode));
         });
@@ -160,9 +173,13 @@ export default function Supervision() {
                         <TableCell className="font-medium">{u.full_name || "—"}</TableCell>
                         <TableCell>{u.department || "—"}</TableCell>
                         <TableCell>
-                          {u.roles.map((r) => (
-                            <Badge key={r} variant={roleBadgeVariant(r) as any} className="mr-1 capitalize">{r}</Badge>
-                          ))}
+                          <div className="flex flex-wrap gap-2">
+                            {sortRolesForDisplay(u.roles).map((r) => (
+                              <Badge key={r} variant={roleBadgeVariant(r) as any} className="capitalize min-w-[92px] justify-center text-center">
+                                {r}
+                              </Badge>
+                            ))}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -193,9 +210,13 @@ export default function Supervision() {
                         <TableCell className="font-medium">{u.full_name || "—"}</TableCell>
                         <TableCell>{u.department || "—"}</TableCell>
                         <TableCell>
-                          {u.roles.map((r) => (
-                            <Badge key={r} variant={roleBadgeVariant(r) as any} className="mr-1 capitalize">{r}</Badge>
-                          ))}
+                          <div className="flex flex-wrap gap-2">
+                            {sortRolesForDisplay(u.roles).map((r) => (
+                              <Badge key={r} variant={roleBadgeVariant(r) as any} className="capitalize min-w-[92px] justify-center text-center">
+                                {r}
+                              </Badge>
+                            ))}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
