@@ -27,8 +27,6 @@ const relevancySteps = [
   { label: "Very High", color: "bg-emerald-500" },
 ] as const;
 
-const displayedRelevancySteps = [...relevancySteps].reverse();
-
 function normalizeRelevancy(raw: unknown): { label: string; index: number } {
   const byIndex = (index: number): { label: string; index: number } => {
     const clamped = Math.max(0, Math.min(4, index));
@@ -164,10 +162,9 @@ export function QuestionCard({ question, index, comment, onCommentChange, onComm
             <span className="font-medium text-card-foreground">{relevancy.label}</span>
           </div>
           <div className="flex gap-1">
-            {displayedRelevancySteps.map((step, idx) => {
-              const sourceIndex = relevancySteps.findIndex((candidate) => candidate.label === step.label);
-              const isActive = relevancy.index >= 0 && sourceIndex >= 4 - relevancy.index;
-              const isCurrent = sourceIndex === relevancy.index;
+            {relevancySteps.map((step, idx) => {
+              const isActive = relevancy.index >= 0 && idx <= relevancy.index;
+              const isCurrent = idx === relevancy.index;
               return (
                 <div key={step.label} className="flex-1">
                   <div

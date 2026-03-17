@@ -10,11 +10,13 @@ import { useAuth } from "@/hooks/useAuth";
 type SupervisedUser = {
   user_id: string;
   full_name: string | null;
+  email: string | null;
   department: string | null;
   roles: string[];
 };
 
 const ROLE_DISPLAY_ORDER = ["admin", "moderator", "lecturer"] as const;
+const DESIGNATED_SUPER_ADMIN_EMAIL = "wyeyi621@gmail.com";
 
 function sortRolesForDisplay(roles: string[]): string[] {
   const order = new Map<string, number>(ROLE_DISPLAY_ORDER.map((role, index) => [role, index]));
@@ -45,7 +47,7 @@ export default function Supervision() {
     }
 
     const [profilesRes, rolesRes, moduleMapRes, moderatorModulesRes, analysisRowsRes] = await Promise.all([
-      supabase.from("profiles").select("user_id, full_name, department"),
+      supabase.from("profiles").select("user_id, full_name, email, department"),
       supabase.from("user_roles").select("user_id, role"),
       supabase.from("system_settings").select("value").eq("key", "user_module_map").maybeSingle(),
       supabase.from("moderator_modules").select("user_id, module_code"),
@@ -104,10 +106,12 @@ export default function Supervision() {
         .map((p) => ({
           user_id: p.user_id,
           full_name: p.full_name,
+          email: p.email,
           department: p.department,
           roles: roles?.filter((r) => r.user_id === p.user_id).map((r) => r.role) ?? [],
         }))
         .filter((u) => {
+          if ((u.email ?? "").trim().toLowerCase() === DESIGNATED_SUPER_ADMIN_EMAIL) return false;
           if (!(u.roles.includes("lecturer") || u.roles.includes("moderator"))) return false;
           if (isSuperAdmin) return true;
           const targetModules = userModuleMap.get(u.user_id) ?? [];
